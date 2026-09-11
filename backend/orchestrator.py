@@ -57,7 +57,7 @@ specialist_llm = (
     ChatGroq(
         model="qwen/qwen3.6-27b",
         api_key=GROQ_API_KEY,
-        max_tokens=700,
+        max_tokens=950,
         reasoning_effort="none",
         reasoning_format="hidden",
     )

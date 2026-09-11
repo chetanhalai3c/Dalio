@@ -17,7 +17,6 @@ from backend.knowledge import retrieve_knowledge
 PORTFOLIO_KNOWLEDGE_FILES = [
     "investment_philosophy.md",
     "diversification.md",
-    "risk_balancing.md",
     "asset_roles.md",
 ]
 
@@ -58,17 +57,19 @@ def portfolio_agent(
             "diversification",
             "economic exposure",
             "asset roles",
-            "risk balancing",
         ],
-        max_sections=6,
-        max_chars=9000,
+        max_sections=5,
+        max_chars=7500,
     )
 
     prompt = f"""
 You are the Portfolio Specialist for EducosysDalio.
 
-Your responsibility is to diagnose the STRUCTURE of the investor's
-current portfolio.
+Your job is to produce compact specialist findings about the STRUCTURE
+of the investor's current portfolio.
+
+These findings will later be combined with Market, Risk and Allocation
+analysis by a separate final education layer.
 
 Investor Request:
 {state.get("user_query", "")}
@@ -82,54 +83,60 @@ Current Portfolio:
 Relevant EducosysDalio Knowledge:
 {portfolio_knowledge}
 
-Analyse:
+Return ONLY these four sections:
 
-1. Portfolio composition and capital weights
-2. Asset-class concentration
-3. Single-position concentration
-4. Obvious overlapping exposures
-5. Structural diversification
-6. Important economic exposure patterns
-7. Missing information needed for deeper analysis
+1. OBSERVED STRUCTURE
+- Total supplied portfolio value and capital weights.
+- Asset classes directly visible in the supplied portfolio.
 
-Rules:
+2. CONCENTRATION & DIVERSIFICATION
+- Structural concentration visible directly from supplied data.
+- Structural diversification visible directly from supplied data.
 
-- Use only the portfolio and investor information actually supplied.
-- Never invent holdings, values or investor circumstances.
-- Clearly distinguish OBSERVED FACTS from INFERENCES.
-- If an inference relies on knowledge about an instrument or index,
-  clearly label it as an inference.
-- Use the supplied EducosysDalio knowledge as the analytical framework.
+3. POTENTIAL EXPOSURES TO VERIFY
+- Only flag possible overlaps or economic exposures.
+- If verification requires current security, index, sector,
+  geographic or currency information, explicitly assign it
+  to the Market Agent.
 
-IMPORTANT BOUNDARY:
+4. NOT YET ESTABLISHED
+- Quantitative risk information requiring the Risk Agent.
+- Relevant investor information that has not been supplied.
 
-You may identify structural concentration from observable portfolio facts.
+BOUNDARIES:
 
-You must NOT claim or estimate:
-- portfolio volatility
-- asset correlations
+Use only facts supplied in InvestorProfile and Portfolio.
+
+EducosysDalio knowledge provides investment PRINCIPLES.
+It is not evidence about the current characteristics of a specific security.
+
+Do NOT supply or estimate:
+- index constituent weights
+- sector or geographic weights not supplied
+- currency exposures not supplied
+- concentration thresholds
+- volatility
+- correlation
 - covariance
 - drawdown
 - risk contribution
 - quantified diversification benefit
 
-Those require deterministic calculations and belong to the Risk Agent.
-
 Do NOT recommend:
-- target portfolio weights
-- purchases or sales
+- purchases
+- sales
+- target weights
 - rebalancing
 - a new allocation
 
-Those decisions belong to the Allocation Agent.
+Market facts belong to the Market Agent.
+Quantitative risk belongs to the Risk Agent.
+Portfolio changes belong to the Allocation Agent.
 
-If risk metrics have not been calculated, explicitly say that they
-have not yet been established.
-
-If no portfolio has been supplied, state that a personalised portfolio
-diagnosis cannot yet be performed.
-
-Keep the analysis concise and complete.
+Use short bullets.
+Maximum two high-signal bullets per section.
+No introduction, conclusion or table.
+Complete all four sections.
 """
 
     response = llm.invoke(
@@ -137,9 +144,9 @@ Keep the analysis concise and complete.
             SystemMessage(
                 content=(
                     "You are the Portfolio Specialist for EducosysDalio. "
-                    "Diagnose portfolio structure using the supplied facts "
-                    "and EducosysDalio knowledge. Do not perform the Risk "
-                    "Agent or Allocation Agent's responsibilities."
+                    "Produce compact structural findings only. "
+                    "Do not perform Market, Risk, Allocation, or final "
+                    "education responsibilities."
                 )
             ),
             HumanMessage(content=prompt),
