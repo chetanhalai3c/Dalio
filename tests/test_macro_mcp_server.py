@@ -1,11 +1,30 @@
 from decimal import Decimal
+from unittest.mock import patch
+
+import pytest
 
 from mcp_servers.macro_mcp_server import (
     build_macro_observation,
     calculate_direction,
+    fetch_oecd_inflation,
 )
 from models.macro import TrendDirection
 
+# =========================
+# Fake HTTP Response
+# =========================
+
+class FakeResponse:
+    def __init__(
+        self,
+        text: str,
+        url: str = "https://example.com/oecd",
+    ):
+        self.text = text
+        self.url = url
+
+    def raise_for_status(self):
+        return None
 
 # =========================
 # Scenario 1 — Rising
@@ -99,3 +118,52 @@ def test_build_observation_without_previous_value():
     assert observation.latest_value == Decimal("4.0")
     assert observation.previous_value is None
     assert observation.direction == TrendDirection.UNKNOWN
+
+# =========================
+# Scenario 7 — OECD Inflation Fetch
+# =========================
+
+def test_fetch_oecd_inflation():
+    csv_data = (
+        "TIME_PERIOD,OBS_VALUE\n"
+        "2026-07,4.0\n"
+        "2026-08,3.8\n"
+    )
+
+    with patch(
+        "mcp_servers.macro_mcp_server.requests.get",
+        return_value=FakeResponse(csv_data),
+    ):
+        observation = fetch_oecd_inflation(
+            "GBR"
+        )
+
+    assert observation.indicator == (
+        "Consumer Price Inflation"
+    )
+    assert observation.latest_value == Decimal("3.8")
+    assert observation.previous_value == Decimal("4.0")
+    assert observation.latest_period == "2026-08"
+    assert observation.previous_period == "2026-07"
+    assert observation.direction == TrendDirection.FALLING
+    assert observation.source == "OECD Data Explorer"
+
+
+# =========================
+# Scenario 8 — No OECD Data
+# =========================
+
+def test_fetch_oecd_inflation_without_data():
+    csv_data = "TIME_PERIOD,OBS_VALUE\n"
+
+    with patch(
+        "mcp_servers.macro_mcp_server.requests.get",
+        return_value=FakeResponse(csv_data),
+    ):
+        with pytest.raises(
+            ValueError,
+            match="No OECD inflation data found",
+        ):
+            fetch_oecd_inflation(
+                "GBR"
+            )
