@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -5,14 +6,49 @@ import pytest
 
 from mcp_servers.macro_mcp_server import (
     build_macro_observation,
+    build_macro_snapshot,
     calculate_direction,
     fetch_bis_policy_rate,
     fetch_oecd_growth,
     fetch_oecd_inflation,
 )
 
-from models.macro import TrendDirection
+from models.macro import (
+    MacroObservation,
+    TrendDirection,
+)
 
+from mcp.server import MCPServer
+# =========================
+# Macro Snapshot MCP Tool
+# =========================
+
+@mcp.tool()
+def get_macro_snapshot(
+    geography: str,
+    geography_code: str,
+    oecd_code: str,
+    bis_code: str,
+) -> dict:
+    snapshot = build_macro_snapshot(
+        geography=geography,
+        geography_code=geography_code,
+        oecd_code=oecd_code,
+        bis_code=bis_code,
+    )
+
+    return snapshot.model_dump(
+        mode="json"
+    )
+
+
+# =========================
+# MCP Server Runner
+# =========================
+
+if __name__ == "__main__":
+    mcp.run()
+    
 # =========================
 # Fake HTTP Response
 # =========================
@@ -265,3 +301,101 @@ def test_fetch_bis_policy_rate_without_data():
             fetch_bis_policy_rate(
                 "GB"
             )
+
+# =========================
+# Scenario 13 — Complete Macro Snapshot
+# =========================
+
+def test_build_complete_macro_snapshot():
+    growth = MacroObservation(
+        indicator="Real GDP Growth",
+        latest_value=Decimal("0.4"),
+        previous_value=Decimal("0.2"),
+        unit="percent",
+        latest_period="2026-Q2",
+        previous_period="2026-Q1",
+        direction=TrendDirection.RISING,
+        source="OECD Data Explorer",
+    )
+
+    inflation = MacroObservation(
+        indicator="Consumer Price Inflation",
+        latest_value=Decimal("3.1"),
+        previous_value=Decimal("2.8"),
+        unit="percent",
+        latest_period="2026-07",
+        previous_period="2026-06",
+        direction=TrendDirection.RISING,
+        source="OECD Data Explorer",
+    )
+
+    policy_rate = MacroObservation(
+        indicator="Central Bank Policy Rate",
+        latest_value=Decimal("3.75"),
+        previous_value=Decimal("3.75"),
+        unit="percent",
+        latest_period="2026-08",
+        previous_period="2026-07",
+        direction=TrendDirection.STABLE,
+        source="BIS Data Portal",
+    )
+
+    with patch(
+        "mcp_servers.macro_mcp_server.fetch_oecd_growth",
+        return_value=growth,
+    ), patch(
+        "mcp_servers.macro_mcp_server.fetch_oecd_inflation",
+        return_value=inflation,
+    ), patch(
+        "mcp_servers.macro_mcp_server.fetch_bis_policy_rate",
+        return_value=policy_rate,
+    ):
+        snapshot = build_macro_snapshot(
+            geography="United Kingdom",
+            geography_code="GB",
+            oecd_code="GBR",
+            bis_code="GB",
+        )
+
+    assert snapshot.geography == "United Kingdom"
+    assert snapshot.geography_code == "GB"
+    assert snapshot.as_of_date == date.today()
+    assert snapshot.growth == growth
+    assert snapshot.inflation == inflation
+    assert snapshot.policy_rate == policy_rate
+
+
+# =========================
+# Scenario 14 — Partial Macro Snapshot
+# =========================
+
+def test_build_partial_macro_snapshot():
+    inflation = MacroObservation(
+        indicator="Consumer Price Inflation",
+        latest_value=Decimal("3.1"),
+        unit="percent",
+        latest_period="2026-07",
+        direction=TrendDirection.UNKNOWN,
+        source="OECD Data Explorer",
+    )
+
+    with patch(
+        "mcp_servers.macro_mcp_server.fetch_oecd_growth",
+        side_effect=ValueError("No growth data"),
+    ), patch(
+        "mcp_servers.macro_mcp_server.fetch_oecd_inflation",
+        return_value=inflation,
+    ), patch(
+        "mcp_servers.macro_mcp_server.fetch_bis_policy_rate",
+        side_effect=ValueError("No policy-rate data"),
+    ):
+        snapshot = build_macro_snapshot(
+            geography="Example Country",
+            geography_code="EX",
+            oecd_code="EXM",
+            bis_code="EX",
+        )
+
+    assert snapshot.growth is None
+    assert snapshot.inflation == inflation
+    assert snapshot.policy_rate is None

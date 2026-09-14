@@ -7,6 +7,7 @@ import requests
 
 from models.macro import (
     MacroObservation,
+    MacroSnapshot,
     TrendDirection,
 )
 
@@ -393,4 +394,75 @@ def fetch_bis_policy_rate(
         ),
         source="BIS Data Portal",
         source_url=response.url,
+    )
+
+# =========================
+# Macro Snapshot Builder
+# =========================
+
+def build_macro_snapshot(
+    geography: str,
+    geography_code: str,
+    oecd_code: str,
+    bis_code: str,
+) -> MacroSnapshot:
+    growth = fetch_oecd_growth(
+        oecd_code
+    )
+
+    inflation = fetch_oecd_inflation(
+        oecd_code
+    )
+
+    policy_rate = fetch_bis_policy_rate(
+        bis_code
+    )
+
+    return MacroSnapshot(
+        geography=geography,
+        geography_code=geography_code,
+        as_of_date=date.today(),
+        growth=growth,
+        inflation=inflation,
+        policy_rate=policy_rate,
+    )
+
+# =========================
+# Macro Snapshot Builder
+# =========================
+
+def build_macro_snapshot(
+    geography: str,
+    geography_code: str,
+    oecd_code: str,
+    bis_code: str,
+) -> MacroSnapshot:
+    try:
+        growth = fetch_oecd_growth(
+            oecd_code
+        )
+    except ValueError:
+        growth = None
+
+    try:
+        inflation = fetch_oecd_inflation(
+            oecd_code
+        )
+    except ValueError:
+        inflation = None
+
+    try:
+        policy_rate = fetch_bis_policy_rate(
+            bis_code
+        )
+    except ValueError:
+        policy_rate = None
+
+    return MacroSnapshot(
+        geography=geography,
+        geography_code=geography_code,
+        as_of_date=date.today(),
+        growth=growth,
+        inflation=inflation,
+        policy_rate=policy_rate,
     )
