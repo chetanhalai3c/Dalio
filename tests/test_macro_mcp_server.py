@@ -6,8 +6,10 @@ import pytest
 from mcp_servers.macro_mcp_server import (
     build_macro_observation,
     calculate_direction,
+    fetch_oecd_growth,
     fetch_oecd_inflation,
 )
+
 from models.macro import TrendDirection
 
 # =========================
@@ -165,5 +167,52 @@ def test_fetch_oecd_inflation_without_data():
             match="No OECD inflation data found",
         ):
             fetch_oecd_inflation(
+                "GBR"
+            )
+
+# =========================
+# Scenario 9 — OECD GDP Growth Fetch
+# =========================
+
+def test_fetch_oecd_growth():
+    csv_data = (
+        "TIME_PERIOD,OBS_VALUE\n"
+        "2026-Q1,0.2\n"
+        "2026-Q2,0.4\n"
+    )
+
+    with patch(
+        "mcp_servers.macro_mcp_server.requests.get",
+        return_value=FakeResponse(csv_data),
+    ):
+        observation = fetch_oecd_growth(
+            "GBR"
+        )
+
+    assert observation.indicator == "Real GDP Growth"
+    assert observation.latest_value == Decimal("0.4")
+    assert observation.previous_value == Decimal("0.2")
+    assert observation.latest_period == "2026-Q2"
+    assert observation.previous_period == "2026-Q1"
+    assert observation.direction == TrendDirection.RISING
+    assert observation.source == "OECD Data Explorer"
+
+
+# =========================
+# Scenario 10 — No OECD GDP Data
+# =========================
+
+def test_fetch_oecd_growth_without_data():
+    csv_data = "TIME_PERIOD,OBS_VALUE\n"
+
+    with patch(
+        "mcp_servers.macro_mcp_server.requests.get",
+        return_value=FakeResponse(csv_data),
+    ):
+        with pytest.raises(
+            ValueError,
+            match="No OECD GDP growth data found",
+        ):
+            fetch_oecd_growth(
                 "GBR"
             )

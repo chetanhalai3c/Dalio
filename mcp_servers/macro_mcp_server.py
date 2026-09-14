@@ -228,3 +228,87 @@ def fetch_oecd_inflation(
         source="OECD Data Explorer",
         source_url=response.url,
     )
+
+# =========================
+# OECD GDP Growth Fetcher
+# =========================
+
+def fetch_oecd_growth(
+    geography_code: str,
+) -> MacroObservation:
+    country_code = geography_code.upper()
+
+    url = (
+        "https://sdmx.oecd.org/public/rest/data/"
+        "OECD.SDD.NAD,"
+        "DSD_NAMAIN1@DF_QNA_EXPENDITURE_GROWTH_OECD,1.1/"
+        f"Q..{country_code}.S1..B1GQ......G1."
+    )
+
+    response = requests.get(
+        url,
+        params={
+            "startPeriod": f"{date.today().year - 1}-Q1",
+            "dimensionAtObservation": "AllDimensions",
+            "format": "csvfile",
+        },
+        timeout=20,
+    )
+
+    response.raise_for_status()
+
+    rows = list(
+        csv.DictReader(
+            StringIO(response.text)
+        )
+    )
+
+    observations = [
+        row
+        for row in rows
+        if row.get("OBS_VALUE")
+        and row.get("TIME_PERIOD")
+    ]
+
+    observations.sort(
+        key=lambda row: row["TIME_PERIOD"]
+    )
+
+    if not observations:
+        raise ValueError(
+            f"No OECD GDP growth data found for "
+            f"{country_code}."
+        )
+
+    latest = observations[-1]
+
+    previous = (
+        observations[-2]
+        if len(observations) >= 2
+        else None
+    )
+
+    latest_value = Decimal(
+        latest["OBS_VALUE"]
+    )
+
+    previous_value = (
+        Decimal(previous["OBS_VALUE"])
+        if previous is not None
+        else None
+    )
+
+    return build_macro_observation(
+        indicator="Real GDP Growth",
+        latest_value=latest_value,
+        previous_value=previous_value,
+        unit="percent",
+        latest_period=latest["TIME_PERIOD"],
+        previous_period=(
+            previous["TIME_PERIOD"]
+            if previous is not None
+            else None
+        ),
+        source="OECD Data Explorer",
+        source_url=response.url,
+    )
