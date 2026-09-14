@@ -6,6 +6,7 @@ import pytest
 from mcp_servers.macro_mcp_server import (
     build_macro_observation,
     calculate_direction,
+    fetch_bis_policy_rate,
     fetch_oecd_growth,
     fetch_oecd_inflation,
 )
@@ -215,4 +216,52 @@ def test_fetch_oecd_growth_without_data():
         ):
             fetch_oecd_growth(
                 "GBR"
+            )
+# =========================
+# Scenario 11 — BIS Policy Rate Fetch
+# =========================
+
+def test_fetch_bis_policy_rate():
+    csv_data = (
+        "TIME_PERIOD,OBS_VALUE\n"
+        "2026-07,4.25\n"
+        "2026-08,4.00\n"
+    )
+
+    with patch(
+        "mcp_servers.macro_mcp_server.requests.get",
+        return_value=FakeResponse(csv_data),
+    ):
+        observation = fetch_bis_policy_rate(
+            "GB"
+        )
+
+    assert observation.indicator == (
+        "Central Bank Policy Rate"
+    )
+    assert observation.latest_value == Decimal("4.00")
+    assert observation.previous_value == Decimal("4.25")
+    assert observation.latest_period == "2026-08"
+    assert observation.previous_period == "2026-07"
+    assert observation.direction == TrendDirection.FALLING
+    assert observation.source == "BIS Data Portal"
+
+
+# =========================
+# Scenario 12 — No BIS Policy Rate Data
+# =========================
+
+def test_fetch_bis_policy_rate_without_data():
+    csv_data = "TIME_PERIOD,OBS_VALUE\n"
+
+    with patch(
+        "mcp_servers.macro_mcp_server.requests.get",
+        return_value=FakeResponse(csv_data),
+    ):
+        with pytest.raises(
+            ValueError,
+            match="No BIS policy-rate data found",
+        ):
+            fetch_bis_policy_rate(
+                "GB"
             )

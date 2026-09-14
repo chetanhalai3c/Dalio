@@ -312,3 +312,85 @@ def fetch_oecd_growth(
         source="OECD Data Explorer",
         source_url=response.url,
     )
+
+# =========================
+# BIS Policy Rate Fetcher
+# =========================
+
+def fetch_bis_policy_rate(
+    geography_code: str,
+) -> MacroObservation:
+    country_code = geography_code.upper()
+
+    url = (
+        "https://stats.bis.org/api/v2/data/"
+        "dataflow/BIS/WS_CBPOL/1.0/"
+        f"M.{country_code}"
+    )
+
+    response = requests.get(
+        url,
+        params={
+            "lastNObservations": 2,
+            "format": "csvfile",
+        },
+        timeout=20,
+    )
+
+    response.raise_for_status()
+
+    rows = list(
+        csv.DictReader(
+            StringIO(response.text)
+        )
+    )
+
+    observations = [
+        row
+        for row in rows
+        if row.get("OBS_VALUE")
+        and row.get("TIME_PERIOD")
+    ]
+
+    observations.sort(
+        key=lambda row: row["TIME_PERIOD"]
+    )
+
+    if not observations:
+        raise ValueError(
+            f"No BIS policy-rate data found for "
+            f"{country_code}."
+        )
+
+    latest = observations[-1]
+
+    previous = (
+        observations[-2]
+        if len(observations) >= 2
+        else None
+    )
+
+    latest_value = Decimal(
+        latest["OBS_VALUE"]
+    )
+
+    previous_value = (
+        Decimal(previous["OBS_VALUE"])
+        if previous is not None
+        else None
+    )
+
+    return build_macro_observation(
+        indicator="Central Bank Policy Rate",
+        latest_value=latest_value,
+        previous_value=previous_value,
+        unit="percent",
+        latest_period=latest["TIME_PERIOD"],
+        previous_period=(
+            previous["TIME_PERIOD"]
+            if previous is not None
+            else None
+        ),
+        source="BIS Data Portal",
+        source_url=response.url,
+    )
