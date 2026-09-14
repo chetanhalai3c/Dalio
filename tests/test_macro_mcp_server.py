@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from mcp_servers.macro_mcp_server import (
     fetch_bis_policy_rate,
     fetch_oecd_growth,
     fetch_oecd_inflation,
+    mcp,
 )
 
 from models.macro import (
@@ -19,6 +21,8 @@ from models.macro import (
 )
 
 from mcp.server import MCPServer
+
+
 # =========================
 # Macro Snapshot MCP Tool
 # =========================
@@ -42,13 +46,6 @@ def get_macro_snapshot(
     )
 
 
-# =========================
-# MCP Server Runner
-# =========================
-
-if __name__ == "__main__":
-    mcp.run()
-    
 # =========================
 # Fake HTTP Response
 # =========================
@@ -399,3 +396,19 @@ def test_build_partial_macro_snapshot():
     assert snapshot.growth is None
     assert snapshot.inflation == inflation
     assert snapshot.policy_rate is None
+
+# =========================
+# Scenario 15 — MCP Tool Registered
+# =========================
+
+def test_macro_snapshot_mcp_tool_registered():
+    tools = asyncio.run(
+        mcp.list_tools()
+    )
+
+    tool_names = [
+        tool.name
+        for tool in tools
+    ]
+
+    assert "get_macro_snapshot" in tool_names

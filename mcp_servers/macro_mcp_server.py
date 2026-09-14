@@ -11,6 +11,17 @@ from models.macro import (
     TrendDirection,
 )
 
+from mcp.server.mcpserver import MCPServer
+
+
+
+# =========================
+# MCP Server
+# =========================
+
+mcp = MCPServer(
+    "EducosysDalio Macro Server"
+)
 
 # =========================
 # Trend Direction Helper
@@ -466,3 +477,33 @@ def build_macro_snapshot(
         inflation=inflation,
         policy_rate=policy_rate,
     )
+
+# =========================
+# Macro Snapshot MCP Tool
+# =========================
+
+@mcp.tool()
+def get_macro_snapshot(
+    geography: str,
+    geography_code: str,
+    oecd_code: str,
+    bis_code: str,
+) -> dict:
+    snapshot = build_macro_snapshot(
+        geography=geography,
+        geography_code=geography_code,
+        oecd_code=oecd_code,
+        bis_code=bis_code,
+    )
+
+    return snapshot.model_dump(
+        mode="json"
+    )
+
+
+# =========================
+# MCP Server Runner
+# =========================
+
+if __name__ == "__main__":
+    mcp.run()
