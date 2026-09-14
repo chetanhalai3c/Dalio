@@ -5,7 +5,7 @@ from langchain_core.messages import AnyMessage
 
 from models.investor_profile import InvestorProfile
 from models.portfolio import Portfolio
-
+from models.macro import MacroSnapshot
 
 # =========================
 # Shared Investor State
@@ -26,6 +26,7 @@ class InvestorState(TypedDict, total=False):
     supervisor_reasoning: str
 
     # Specialist analysis
+    macro_snapshot: MacroSnapshot
     macro_results: str
     market_results: str
     portfolio_results: str
