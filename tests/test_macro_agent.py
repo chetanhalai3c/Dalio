@@ -135,3 +135,70 @@ def test_macro_agent_without_snapshot(
         "Macro environment interpreted."
     )
     assert result["llm_calls"] == 3
+
+# =========================
+# Evidence Guardrail Integration
+# =========================
+
+def test_macro_agent_replaces_unsupported_analysis(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "agents.macro_agent.retrieve_knowledge",
+        lambda **kwargs: "Macro knowledge",
+    )
+
+    class UnsafeLLM:
+        def invoke(
+            self,
+            messages,
+        ):
+            return FakeResponse(
+                "The economy appears to be in a "
+                "later-stage short-term cycle."
+            )
+
+    snapshot = MacroSnapshot(
+        geography="United Kingdom",
+        geography_code="GB",
+        as_of_date=date(2026, 9, 15),
+        growth=MacroObservation(
+            indicator="Real GDP Growth",
+            latest_value=Decimal("0.4"),
+            previous_value=Decimal("0.6"),
+            unit="percent",
+            latest_period="2026-Q2",
+            previous_period="2026-Q1",
+            direction=TrendDirection.FALLING,
+            source="OECD Data Explorer",
+        ),
+    )
+
+    result = macro_agent(
+        {
+            "user_query": (
+                "What is happening in the economy?"
+            ),
+            "macro_snapshot": snapshot,
+            "llm_calls": 0,
+        },
+        UnsafeLLM(),
+    )
+
+    assert (
+        "later-stage short-term cycle"
+        not in result["macro_results"]
+    )
+
+    assert (
+        "Growth: 0.4 percent, direction falling."
+        in result["macro_results"]
+    )
+
+    assert (
+        "specific economic regime and its causes "
+        "are not established"
+        in result["macro_results"]
+    )
+
+    assert result["llm_calls"] == 1

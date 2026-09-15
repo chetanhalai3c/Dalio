@@ -13,7 +13,10 @@ from langchain_groq import ChatGroq
 
 from backend.state import InvestorState
 from backend.guardrails.input_guardrail import evaluate_input_guardrail
-
+from agents.macro_agent import macro_agent
+from mcp_servers.macro_mcp_server import (
+    build_macro_snapshot_for_country,
+)
 
 # =========================
 # Environment
@@ -38,11 +41,11 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 llm = (
     ChatGroq(
-        model="qwen/qwen3.6-27b",
+        model="openai/gpt-oss-120b",
         api_key=GROQ_API_KEY,
         max_tokens=300,
-        reasoning_effort="none",
-        reasoning_format="hidden",
+        reasoning_effort="low",
+        
     )
     if GROQ_API_KEY
     else None
@@ -55,11 +58,11 @@ llm = (
 
 specialist_llm = (
     ChatGroq(
-        model="qwen/qwen3.6-27b",
+        model="openai/gpt-oss-120b",
         api_key=GROQ_API_KEY,
-        max_tokens=950,
-        reasoning_effort="none",
-        reasoning_format="hidden",
+        max_tokens=4000,
+        reasoning_effort="high",
+        
     )
     if GROQ_API_KEY
     else None
@@ -270,4 +273,77 @@ Investor request:
             )
         ],
         "llm_calls": llm_calls,
+    }
+# =========================
+# Macro Data Node
+# =========================
+
+def run_macro_data(
+    state: InvestorState,
+) -> dict[str, Any]:
+    investor_profile = state.get(
+        "investor_profile"
+    )
+
+    if investor_profile is None:
+        return {}
+
+    country_code = (
+        investor_profile
+        .jurisdiction_currency
+        .country_of_residence
+    )
+
+    if country_code is None:
+        return {}
+
+    snapshot = build_macro_snapshot_for_country(
+        country_code
+    )
+
+    return {
+        "macro_snapshot": snapshot
+    }
+
+
+# =========================
+# Macro Specialist Node
+# =========================
+
+def run_macro_specialist(
+    state: InvestorState,
+) -> dict[str, Any]:
+    if specialist_llm is None:
+        raise ValueError(
+            "GROQ_API_KEY is required for live specialist LLM calls."
+        )
+
+    return macro_agent(
+        state,
+        specialist_llm,
+    )
+
+# =========================
+# Macro Workflow
+# =========================
+
+def run_macro_workflow(
+    state: InvestorState,
+) -> dict[str, Any]:
+    macro_data = run_macro_data(
+        state
+    )
+
+    enriched_state = {
+        **state,
+        **macro_data,
+    }
+
+    macro_analysis = run_macro_specialist(
+        enriched_state
+    )
+
+    return {
+        **macro_data,
+        **macro_analysis,
     }

@@ -2,6 +2,7 @@ import asyncio
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
+import pycountry
 
 import pytest
 
@@ -12,7 +13,7 @@ from mcp_servers.macro_mcp_server import (
     fetch_bis_policy_rate,
     fetch_oecd_growth,
     fetch_oecd_inflation,
-    mcp,
+    mcp,resolve_macro_country_codes,
 )
 
 from models.macro import (
@@ -412,3 +413,42 @@ def test_macro_snapshot_mcp_tool_registered():
     ]
 
     assert "get_macro_snapshot" in tool_names
+
+# =========================
+# Macro Country Resolution
+# =========================
+
+def test_resolve_uk_macro_country_codes():
+    codes = resolve_macro_country_codes(
+        "GB"
+    )
+
+    assert codes == {
+        "geography": "United Kingdom",
+        "geography_code": "GB",
+        "oecd_code": "GBR",
+        "bis_code": "GB",
+    }
+
+
+def test_resolve_japan_macro_country_codes():
+    codes = resolve_macro_country_codes(
+        "JP"
+    )
+
+    assert codes == {
+        "geography": "Japan",
+        "geography_code": "JP",
+        "oecd_code": "JPN",
+        "bis_code": "JP",
+    }
+
+
+def test_reject_unknown_macro_country_code():
+    with pytest.raises(
+        ValueError,
+        match="Unknown country code",
+    ):
+        resolve_macro_country_codes(
+            "ZZ"
+        )

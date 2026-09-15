@@ -1,4 +1,5 @@
 from backend import orchestrator
+from models.investor_profile import InvestorProfile
 
 
 # =========================
@@ -147,3 +148,145 @@ def test_cio_filters_unknown_agents(monkeypatch):
     assert result["selected_agents"] == [
         "portfolio_agent"
     ]
+
+# =========================
+# Macro Specialist Routing
+# =========================
+
+def test_run_macro_specialist(
+    monkeypatch,
+):
+    fake_llm = object()
+
+    monkeypatch.setattr(
+        orchestrator,
+        "specialist_llm",
+        fake_llm,
+    )
+
+    captured = {}
+
+    def fake_macro_agent(
+        state,
+        llm,
+    ):
+        captured["state"] = state
+        captured["llm"] = llm
+
+        return {
+            "macro_results": "Macro analysis complete."
+        }
+
+    monkeypatch.setattr(
+        orchestrator,
+        "macro_agent",
+        fake_macro_agent,
+    )
+
+    state = {
+        "user_query": "What is happening in the economy?",
+        "llm_calls": 0,
+    }
+
+    result = orchestrator.run_macro_specialist(
+        state
+    )
+
+    assert captured["state"] == state
+    assert captured["llm"] is fake_llm
+    assert result["macro_results"] == (
+        "Macro analysis complete."
+    )
+
+
+# =========================
+# Macro Data Routing
+# =========================
+
+def test_run_macro_data(
+    monkeypatch,
+):
+    fake_snapshot = object()
+    captured = {}
+
+    def fake_build_macro_snapshot_for_country(
+        country_code,
+    ):
+        captured["country_code"] = country_code
+        return fake_snapshot
+
+    monkeypatch.setattr(
+        orchestrator,
+        "build_macro_snapshot_for_country",
+        fake_build_macro_snapshot_for_country,
+    )
+
+    investor_profile = InvestorProfile(
+        jurisdiction_currency={
+            "country_of_residence": "GB",
+        }
+    )
+
+    result = orchestrator.run_macro_data(
+        {
+            "investor_profile": investor_profile,
+        }
+    )
+
+    assert captured["country_code"] == "GB"
+    assert result["macro_snapshot"] is fake_snapshot
+
+# =========================
+# Macro Workflow
+# =========================
+
+def test_run_macro_workflow(
+    monkeypatch,
+):
+    fake_snapshot = object()
+    captured = {}
+
+    def fake_run_macro_data(
+        state,
+    ):
+        return {
+            "macro_snapshot": fake_snapshot
+        }
+
+    def fake_run_macro_specialist(
+        state,
+    ):
+        captured["state"] = state
+
+        return {
+            "macro_results": "Macro analysis complete."
+        }
+
+    monkeypatch.setattr(
+        orchestrator,
+        "run_macro_data",
+        fake_run_macro_data,
+    )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "run_macro_specialist",
+        fake_run_macro_specialist,
+    )
+
+    state = {
+        "user_query": "What is happening in the economy?",
+        "llm_calls": 0,
+    }
+
+    result = orchestrator.run_macro_workflow(
+        state
+    )
+
+    assert captured["state"]["macro_snapshot"] is fake_snapshot
+
+    assert result["macro_snapshot"] is fake_snapshot
+
+    assert result["macro_results"] == (
+        "Macro analysis complete."
+    )

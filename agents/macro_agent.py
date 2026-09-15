@@ -8,6 +8,10 @@ from langchain_core.messages import (
 
 from backend.knowledge import retrieve_knowledge
 from backend.state import InvestorState
+from backend.guardrails.macro_evidence_guardrail import (
+    build_safe_macro_fallback,
+    macro_analysis_is_grounded,
+)
 
 
 # =========================
@@ -76,6 +80,7 @@ economic conditions.
 Use the provided Dalio knowledge only to interpret those facts.
 
 Do NOT invent:
+
 - missing macro indicators
 - future economic data
 - future market performance
@@ -85,6 +90,7 @@ Do NOT invent:
 - precise forecasts
 
 Do NOT recommend:
+
 - purchases
 - sales
 - target portfolio weights
@@ -94,6 +100,7 @@ Do NOT recommend:
 Those decisions belong to the Allocation Agent.
 
 Clearly distinguish:
+
 - observed macro facts
 - interpretation from the provided knowledge
 - information that is not yet established
@@ -104,6 +111,7 @@ Treat only values and metadata explicitly contained in the
 Macro Snapshot as current economic facts.
 
 Do NOT independently introduce or infer:
+
 - central-bank names
 - inflation targets
 - unemployment or wage conditions
@@ -118,6 +126,7 @@ Do NOT independently introduce or infer:
 - whether an easing or tightening cycle is underway
 
 Do NOT calculate new economic metrics inside the LLM, including:
+
 - real interest rates
 - spreads
 - growth differentials
@@ -135,8 +144,6 @@ For example:
 
 HARD INTERPRETATION RULES:
 
-HARD INTERPRETATION RULES:
-
 - Describe a stable policy rate only as unchanged between the
   supplied observations.
 - Never describe a stable rate as a pause, tightening cycle,
@@ -150,7 +157,7 @@ HARD INTERPRETATION RULES:
 - Do not introduce outside frameworks, theories, or terminology
   from the LLM's general knowledge.
 - A hypothetical framework explanation must not be presented as
-  a description of the current UK economy.
+  a description of the current economy.
 - Never use one supplied indicator as a proxy for another
   unsupplied indicator unless that relationship is explicitly
   defined in DALIO KNOWLEDGE.
@@ -165,7 +172,6 @@ HARD INTERPRETATION RULES:
   Macro Snapshot.
 - Do not introduce unconventional monetary-policy tools merely
   because the policy rate is stable.
-
 
 You may explain what the observed combination can mean within the
 supplied Dalio framework, but clearly label that as interpretation.
@@ -209,10 +215,23 @@ Use short, high-signal bullets.
         ]
     )
 
+    # Capture the LLM's proposed macro analysis.
+    analysis = str(
+        response.content
+    )
+
+    # Check the draft against the evidence guardrail.
+    # If it contains unsupported interpretation, replace it
+    # with the deterministic safe fallback.
+    if not macro_analysis_is_grounded(
+        analysis
+    ):
+        analysis = build_safe_macro_fallback(
+            snapshot_data
+        )
+
     return {
-        "macro_results": str(
-            response.content
-        ),
+        "macro_results": analysis,
         "messages": [
             AIMessage(
                 content=(

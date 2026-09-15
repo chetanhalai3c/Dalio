@@ -2,7 +2,7 @@ import csv
 from datetime import date
 from decimal import Decimal
 from io import StringIO
-
+import pycountry
 import requests
 
 from models.macro import (
@@ -406,6 +406,56 @@ def fetch_bis_policy_rate(
         source="BIS Data Portal",
         source_url=response.url,
     )
+
+# =========================
+# Macro Country Resolution
+# =========================
+
+def resolve_macro_country_codes(
+    country_code: str,
+) -> dict[str, str]:
+    country_code = country_code.upper().strip()
+
+    if len(country_code) != 2:
+        raise ValueError(
+            "Country must use a 2-letter ISO-style code."
+        )
+
+    country = pycountry.countries.get(
+        alpha_2=country_code
+    )
+
+    if country is None:
+        raise ValueError(
+            f"Unknown country code: {country_code}"
+        )
+
+    return {
+        "geography": country.name,
+        "geography_code": country.alpha_2,
+        "oecd_code": country.alpha_3,
+        "bis_code": country.alpha_2,
+    }
+
+
+# =========================
+# Country Macro Snapshot
+# =========================
+
+def build_macro_snapshot_for_country(
+    country_code: str,
+) -> MacroSnapshot:
+    codes = resolve_macro_country_codes(
+        country_code
+    )
+
+    return build_macro_snapshot(
+        geography=codes["geography"],
+        geography_code=codes["geography_code"],
+        oecd_code=codes["oecd_code"],
+        bis_code=codes["bis_code"],
+    )
+
 
 # =========================
 # Macro Snapshot Builder
