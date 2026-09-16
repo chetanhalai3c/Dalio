@@ -195,3 +195,99 @@ def fetch_equity_market(
         # contains the API key.
         source_url="https://www.alphavantage.co/",
     )
+
+# =========================
+# Government Bond Yield Fetcher
+# Fetches the US 10Y Treasury yield and converts it into our MarketObservation contract.
+# =========================
+
+def fetch_government_bond_yield(
+    maturity: str = "10year",
+    api_key: str | None = None,
+) -> MarketObservation: # Fetches one real government-bond market observation.
+
+    resolved_api_key = (
+        api_key
+        or os.getenv("ALPHA_VANTAGE_API_KEY")
+    ) # Tests can inject a key; live code can use the .env value.
+
+    if not resolved_api_key: # Never make an external request without credentials.
+        raise ValueError(
+            "ALPHA_VANTAGE_API_KEY is required."
+        )
+
+    params = {
+        "function": "TREASURY_YIELD", # Alpha Vantage government-bond yield endpoint.
+        "interval": "daily", # We want recent daily observations.
+        "maturity": maturity, # Default is the benchmark 10-year Treasury yield.
+        "apikey": resolved_api_key,
+    }
+
+    response = requests.get(
+        ALPHA_VANTAGE_URL,
+        params=params,
+        timeout=20,
+    ) # Fetch the real provider response.
+
+    response.raise_for_status() # Reject HTTP-level failures.
+
+    payload = response.json() # Treasury endpoint returns structured JSON.
+
+    rows = payload.get(
+        "data",
+        []
+    ) # Extract the time-series observations.
+
+    valid_rows = [
+        row
+        for row in rows
+        if row.get("value") not in (
+            None,
+            "",
+            ".",
+        )
+    ] # Ignore missing Treasury observations such as holidays.
+
+    if not valid_rows: # Provider errors or missing data must not enter trusted state.
+        raise ValueError(
+            f"No valid Treasury yield data returned for maturity: {maturity}"
+        )
+
+    valid_rows.sort(
+        key=lambda row: row["date"],
+        reverse=True,
+    ) # Ensure newest observation is first.
+
+    latest = valid_rows[0] # Most recent valid Treasury yield.
+
+    previous = (
+        valid_rows[1]
+        if len(valid_rows) > 1
+        else None
+    ) # Previous valid yield may be unavailable.
+
+    return build_market_observation(
+        asset_name="US 10-Year Treasury Yield",
+        asset_class=AssetClass.GOVERNMENT_BONDS,
+        measurement_type=MeasurementType.YIELD,
+        latest_value=Decimal(
+            latest["value"]
+        ),
+        previous_value=(
+            Decimal(previous["value"])
+            if previous
+            else None
+        ),
+        unit="percent",
+        latest_period=latest["date"],
+        previous_period=(
+            previous["date"]
+            if previous
+            else None
+        ),
+        source="Alpha Vantage",
+        symbol="US10Y",
+        geography="US",
+        currency=None, # A yield is a percentage, not a currency-denominated price.
+        source_url="https://www.alphavantage.co/",
+    )

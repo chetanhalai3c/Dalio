@@ -1,20 +1,19 @@
 from decimal import Decimal # Precise numeric values for market tests.
+
+import pytest # Testing framework; also lets us assert that specific errors should happen.
+
 from mcp_servers.market_mcp_server import (
-    build_market_observation,
-    calculate_market_direction,
+    build_market_observation, # Converts provider-style values into our contract.
+    calculate_market_direction, # Calculates rising/falling/stable/unknown.
     fetch_equity_market, # Fetches real-provider-style equity data.
+    fetch_government_bond_yield, # Fetches government-bond yield data.
 )
+
 from models.market import (
     AssetClass, # Used to verify asset classification.
     MarketDirection, # Expected deterministic direction.
     MeasurementType, # Expected type of market measurement.
 )
-
-from mcp_servers.market_mcp_server import (
-    build_market_observation, # Converts provider-style values into our contract.
-    calculate_market_direction, # Calculates rising/falling/stable/unknown.
-)
-
 
 # =========================
 # Rising Direction
@@ -220,5 +219,110 @@ def test_fetch_equity_market_rejects_invalid_data(
             asset_name="Example Equity Market",
             geography="US",
             currency="USD",
+            api_key="test-key",
+        )
+
+# =========================
+# Government Bond Yield Fetcher
+# Treasury data should become a validated GOVERNMENT_BONDS observation.
+# =========================
+
+def test_fetch_government_bond_yield(
+    monkeypatch,
+): # Tests Treasury parsing without making a real internet request.
+
+    class FakeResponse: # Simulates Alpha Vantage Treasury JSON.
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "name": "10-Year Treasury Rate",
+                "interval": "daily",
+                "unit": "percent",
+                "data": [
+                    {
+                        "date": "2026-09-16",
+                        "value": "4.20",
+                    },
+                    {
+                        "date": "2026-09-15",
+                        "value": "4.10",
+                    },
+                ],
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ): # Replaces requests.get during this test.
+
+        assert params["function"] == "TREASURY_YIELD"
+        assert params["interval"] == "daily"
+        assert params["maturity"] == "10year"
+        assert params["apikey"] == "test-key"
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    observation = fetch_government_bond_yield(
+        api_key="test-key",
+    )
+
+    assert observation.asset_class == AssetClass.GOVERNMENT_BONDS
+    assert observation.measurement_type == MeasurementType.YIELD
+    assert observation.latest_value == Decimal("4.20")
+    assert observation.previous_value == Decimal("4.10")
+    assert observation.direction == MarketDirection.RISING
+    assert observation.unit == "percent"
+
+
+# =========================
+# Invalid Government Bond Data
+# Missing Treasury observations should fail safely.
+# =========================
+
+def test_fetch_government_bond_yield_rejects_invalid_data(
+    monkeypatch,
+): # Tests safe failure when provider data is unusable.
+
+    class FakeResponse:
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "data": []
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+        fetch_government_bond_yield(
             api_key="test-key",
         )
