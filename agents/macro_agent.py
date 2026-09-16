@@ -1,41 +1,47 @@
-from typing import Any
+from typing import Any # Any lets the function accept whichever LLM implementation is passed in.
 
 from langchain_core.messages import (
-    AIMessage,
-    HumanMessage,
-    SystemMessage,
+    AIMessage,      # Message written back into workflow/chat history.
+    HumanMessage,   # Carries the actual user task/prompt to the LLM.
+    SystemMessage,  # Defines the LLM's role and hard behavioural rules.
 )
 
-from backend.knowledge import retrieve_knowledge
-from backend.state import InvestorState
+from backend.knowledge import retrieve_knowledge # Retrieves only the relevant Dalio knowledge sections for this macro task.
+
+from backend.state import InvestorState # Shared workflow state containing inputs, evidence, and previous results.
+
 from backend.guardrails.macro_evidence_guardrail import (
-    build_safe_macro_fallback,
-    macro_analysis_is_grounded,
+    build_safe_macro_fallback,   # Creates a safe deterministic answer if LLM output fails.
+    macro_analysis_is_grounded,  # Checks whether LLM analysis stays within evidence boundaries.
 )
 
 
 # =========================
 # Macro Knowledge
+# Defines which knowledge files this specialist is allowed to reason from.
 # =========================
 
 MACRO_KNOWLEDGE_FILES = [
-    "economic_regimes.md",
-    "debt_cycles.md",
-    "all_weather.md",
+    "economic_regimes.md",  # Dalio-style regime interpretation.
+    "debt_cycles.md",       # Debt-cycle framework.
+    "all_weather.md",       # All Weather / economic environment principles.
 ]
 
 
 # =========================
 # Macro Agent
+# Reads macro evidence + knowledge, asks the LLM to interpret it, then validates the result.
 # =========================
 
 def macro_agent(
-    state: InvestorState,
-    llm: Any,
+    state: InvestorState,  # Shared workflow state.
+    llm: Any,              # LLM supplied by the wider application.
 ) -> dict[str, Any]:
+
     macro_snapshot = state.get(
         "macro_snapshot"
     )
+    # Read the already-collected MacroSnapshot from shared state.
 
     snapshot_data = (
         macro_snapshot.model_dump(
@@ -44,13 +50,19 @@ def macro_agent(
         if macro_snapshot is not None
         else {}
     )
+    # Convert Pydantic MacroSnapshot → JSON-friendly dictionary.
+    # If no snapshot exists, use an empty dictionary.
 
     macro_knowledge = retrieve_knowledge(
         query=state.get(
             "user_query",
             "",
         ),
+        # Use the user's question to decide which knowledge sections are relevant.
+
         filenames=MACRO_KNOWLEDGE_FILES,
+        # Search only the macro-related Dalio files.
+
         keywords=[
             "growth",
             "inflation",
@@ -58,8 +70,13 @@ def macro_agent(
             "economic regime",
             "debt cycle",
         ],
+        # Extra retrieval signals for relevant macro concepts.
+
         max_sections=6,
+        # Limit how many knowledge sections are returned.
+
         max_chars=8000,
+        # Prevent too much knowledge from bloating the prompt.
     )
 
     prompt = f"""
@@ -192,6 +209,12 @@ Use these four sections:
 
 Use short, high-signal bullets.
 """
+    # Build one tightly constrained prompt containing:
+    # 1) user question
+    # 2) current macro evidence
+    # 3) permitted Dalio knowledge
+    # 4) strict rules limiting what the LLM may claim
+
 
     response = llm.invoke(
         [
@@ -209,16 +232,23 @@ Use short, high-signal bullets.
                     "state that it is not yet established."
                 )
             ),
+            # SystemMessage establishes the specialist's permanent role
+            # and highest-level reasoning restrictions.
+
             HumanMessage(
                 content=prompt
             ),
+            # HumanMessage contains this specific task, evidence, and knowledge.
         ]
     )
+
 
     # Capture the LLM's proposed macro analysis.
     analysis = str(
         response.content
     )
+    # Important: this is still only a DRAFT at this point.
+
 
     # Check the draft against the evidence guardrail.
     # If it contains unsupported interpretation, replace it
@@ -230,8 +260,11 @@ Use short, high-signal bullets.
             snapshot_data
         )
 
+
     return {
         "macro_results": analysis,
+        # Write the approved/safe macro analysis back to shared state.
+
         "messages": [
             AIMessage(
                 content=(
@@ -239,6 +272,8 @@ Use short, high-signal bullets.
                 )
             )
         ],
+        # Add a lightweight workflow message confirming completion.
+
         "llm_calls": (
             state.get(
                 "llm_calls",
@@ -246,4 +281,5 @@ Use short, high-signal bullets.
             )
             + 1
         ),
+        # Increment the running count of LLM calls.
     }
