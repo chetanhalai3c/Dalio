@@ -1,5 +1,5 @@
 from decimal import Decimal # Precise numeric values for market tests.
-
+from datetime import date
 import pytest # Testing framework; also lets us assert that specific errors should happen.
 
 from mcp_servers.market_mcp_server import (
@@ -11,6 +11,7 @@ from mcp_servers.market_mcp_server import (
     fetch_commodity_market, # Fetches broad commodity-index data.
     fetch_cash_market, # Fetches the short-term Treasury cash proxy.
     fetch_crypto_market, # Fetches Bitcoin/USD market data.
+    build_market_snapshot,
 )
 
 from models.market import (
@@ -757,3 +758,193 @@ def test_fetch_crypto_market_rejects_invalid_data(
         fetch_crypto_market(
             api_key="test-key",
         )
+
+# =========================
+# Complete Market Snapshot
+# All six market feeds should combine into one validated cross-asset snapshot.
+# =========================
+
+def test_build_complete_market_snapshot(
+    monkeypatch,
+):
+
+    def make_observation(
+        asset_class,
+        asset_name,
+        measurement_type=MeasurementType.PRICE,
+    ):
+        return build_market_observation(
+            asset_name=asset_name,
+            asset_class=asset_class,
+            measurement_type=measurement_type,
+            latest_value=Decimal("100"),
+            previous_value=Decimal("95"),
+            unit="test",
+            latest_period="2026-09-16",
+            previous_period="2026-09-15",
+            source="Test Provider",
+        )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_equity_market",
+        lambda **kwargs: make_observation(
+            AssetClass.EQUITIES,
+            "Equities",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_government_bond_yield",
+        lambda **kwargs: make_observation(
+            AssetClass.GOVERNMENT_BONDS,
+            "Government Bonds",
+            MeasurementType.YIELD,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_gold_market",
+        lambda **kwargs: make_observation(
+            AssetClass.GOLD,
+            "Gold",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_commodity_market",
+        lambda **kwargs: make_observation(
+            AssetClass.COMMODITIES,
+            "Commodities",
+            MeasurementType.INDEX,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_cash_market",
+        lambda **kwargs: make_observation(
+            AssetClass.CASH,
+            "Cash",
+            MeasurementType.YIELD,
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_crypto_market",
+        lambda **kwargs: make_observation(
+            AssetClass.CRYPTO,
+            "Crypto",
+        ),
+    )
+
+    snapshot = build_market_snapshot(
+        investor_country="GB",
+        base_currency="GBP",
+        api_key="test-key",
+        as_of_date=date(2026, 9, 16),
+    )
+
+    assert snapshot.as_of_date == date(2026, 9, 16)
+    assert snapshot.investor_country == "GB"
+    assert snapshot.base_currency == "GBP"
+    assert len(snapshot.observations) == 6
+
+    asset_classes = {
+        observation.asset_class
+        for observation in snapshot.observations
+    }
+
+    assert asset_classes == {
+        AssetClass.EQUITIES,
+        AssetClass.GOVERNMENT_BONDS,
+        AssetClass.GOLD,
+        AssetClass.COMMODITIES,
+        AssetClass.CASH,
+        AssetClass.CRYPTO,
+    }
+
+
+# =========================
+# Partial Market Snapshot
+# One unavailable asset feed should not destroy the remaining market picture.
+# =========================
+
+def test_build_partial_market_snapshot(
+    monkeypatch,
+):
+
+    def make_observation(
+        asset_class,
+        asset_name,
+    ):
+        return build_market_observation(
+            asset_name=asset_name,
+            asset_class=asset_class,
+            measurement_type=MeasurementType.PRICE,
+            latest_value=Decimal("100"),
+            previous_value=Decimal("95"),
+            unit="test",
+            latest_period="2026-09-16",
+            previous_period="2026-09-15",
+            source="Test Provider",
+        )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_equity_market",
+        lambda **kwargs: make_observation(
+            AssetClass.EQUITIES,
+            "Equities",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_government_bond_yield",
+        lambda **kwargs: make_observation(
+            AssetClass.GOVERNMENT_BONDS,
+            "Government Bonds",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_gold_market",
+        lambda **kwargs: (_ for _ in ()).throw(
+            ValueError("Gold unavailable")
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_commodity_market",
+        lambda **kwargs: make_observation(
+            AssetClass.COMMODITIES,
+            "Commodities",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_cash_market",
+        lambda **kwargs: make_observation(
+            AssetClass.CASH,
+            "Cash",
+        ),
+    )
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.fetch_crypto_market",
+        lambda **kwargs: make_observation(
+            AssetClass.CRYPTO,
+            "Crypto",
+        ),
+    )
+
+    snapshot = build_market_snapshot(
+        api_key="test-key",
+        as_of_date=date(2026, 9, 16),
+    )
+
+    assert len(snapshot.observations) == 5
+
+    asset_classes = {
+        observation.asset_class
+        for observation in snapshot.observations
+    }
+
+    assert AssetClass.GOLD not in asset_classes

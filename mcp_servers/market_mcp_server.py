@@ -2,6 +2,7 @@ from decimal import Decimal # Precise numeric values for market data.
 import csv # Parses provider CSV responses into Python rows.
 import os # Reads the Alpha Vantage API key from environment variables.
 from io import StringIO # Lets csv.DictReader read the HTTP response text.
+from datetime import date
 
 import requests # Makes HTTP requests to the external market-data provider.
 from mcp.server.mcpserver import MCPServer # Exposes market functions as MCP tools later.
@@ -11,6 +12,7 @@ from models.market import (
     MarketDirection, # Rising / falling / stable / unknown.
     MarketObservation, # Trusted model for ONE market observation.
     MeasurementType, # Price / index / yield / rate.
+    MarketSnapshot,
 )
 
 from decimal import Decimal # Precise numeric values for market data.
@@ -680,4 +682,61 @@ def fetch_crypto_market(
         geography="GLOBAL",
         currency="USD",
         source_url="https://www.alphavantage.co/",
+    )
+
+# =========================
+# Market Snapshot Builder
+# Combines independently fetched asset-class observations into one cross-asset view.
+# =========================
+
+def build_market_snapshot(
+    investor_country: str | None = None,
+    base_currency: str | None = None,
+    api_key: str | None = None,
+    as_of_date: date | None = None,
+) -> MarketSnapshot: # Builds one cross-asset snapshot from the six market fetchers.
+
+    observations: list[MarketObservation] = []
+
+    fetchers = [
+        lambda: fetch_equity_market(
+            symbol="SPY",
+            asset_name="SPDR S&P 500 ETF Trust",
+            geography="US",
+            currency="USD",
+            api_key=api_key,
+        ),
+        lambda: fetch_government_bond_yield(
+            maturity="10year",
+            api_key=api_key,
+        ),
+        lambda: fetch_gold_market(
+            api_key=api_key,
+        ),
+        lambda: fetch_commodity_market(
+            api_key=api_key,
+        ),
+        lambda: fetch_cash_market(
+            api_key=api_key,
+        ),
+        lambda: fetch_crypto_market(
+            api_key=api_key,
+        ),
+    ] # Existing fetchers remain responsible for each individual market fact.
+
+    for fetcher in fetchers:
+        try:
+            observation = fetcher()
+            observations.append(observation)
+        except (
+            requests.RequestException,
+            ValueError,
+        ):
+            continue # One unavailable provider feed should not destroy the whole snapshot.
+
+    return MarketSnapshot(
+        as_of_date=as_of_date or date.today(),
+        investor_country=investor_country,
+        base_currency=base_currency,
+        observations=observations,
     )
