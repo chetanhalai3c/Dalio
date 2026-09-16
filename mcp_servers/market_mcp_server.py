@@ -386,3 +386,100 @@ def fetch_gold_market(
         currency="USD",
         source_url="https://www.alphavantage.co/",
     )
+
+# =========================
+# Commodity Market Fetcher
+# Fetches the broad global commodity index and converts it into our MarketObservation contract.
+# =========================
+
+def fetch_commodity_market(
+    api_key: str | None = None,
+) -> MarketObservation: # Fetches one broad commodity-market observation.
+
+    resolved_api_key = (
+        api_key
+        or os.getenv("ALPHA_VANTAGE_API_KEY")
+    ) # Tests can inject a key; live code can use the .env value.
+
+    if not resolved_api_key: # Never call the provider without credentials.
+        raise ValueError(
+            "ALPHA_VANTAGE_API_KEY is required."
+        )
+
+    params = {
+        "function": "ALL_COMMODITIES", # Broad global commodity-price index.
+        "interval": "monthly", # Provider supports monthly commodity observations.
+        "apikey": resolved_api_key,
+    }
+
+    response = requests.get(
+        ALPHA_VANTAGE_URL,
+        params=params,
+        timeout=20,
+    ) # Fetch real commodity-market data.
+
+    response.raise_for_status() # Reject HTTP-level failures.
+
+    payload = response.json() # Convert provider JSON into Python data.
+
+    rows = payload.get(
+        "data",
+        []
+    ) # Extract commodity-index observations.
+
+    valid_rows = [
+        row
+        for row in rows
+        if row.get("value") not in (
+            None,
+            "",
+            ".",
+        )
+    ] # Remove missing or unusable observations.
+
+    if not valid_rows: # Bad provider data must not enter trusted Market state.
+        raise ValueError(
+            "No valid commodity market data returned."
+        )
+
+    valid_rows.sort(
+        key=lambda row: row["date"],
+        reverse=True,
+    ) # Ensure newest observation appears first.
+
+    latest = valid_rows[0] # Most recent valid commodity observation.
+
+    previous = (
+        valid_rows[1]
+        if len(valid_rows) > 1
+        else None
+    ) # Previous observation may be unavailable.
+
+    return build_market_observation(
+        asset_name="Global Price Index of All Commodities",
+        asset_class=AssetClass.COMMODITIES,
+        measurement_type=MeasurementType.INDEX,
+        latest_value=Decimal(
+            latest["value"]
+        ),
+        previous_value=(
+            Decimal(previous["value"])
+            if previous
+            else None
+        ),
+        unit=payload.get(
+            "unit",
+            "index_points",
+        ), # Preserve the provider's stated unit where available.
+        latest_period=latest["date"],
+        previous_period=(
+            previous["date"]
+            if previous
+            else None
+        ),
+        source="Alpha Vantage",
+        symbol="ALL_COMMODITIES",
+        geography="GLOBAL",
+        currency=None, # Broad commodity index is treated as an index observation.
+        source_url="https://www.alphavantage.co/",
+    )

@@ -8,6 +8,7 @@ from mcp_servers.market_mcp_server import (
     fetch_equity_market, # Fetches real-provider-style equity data.
     fetch_government_bond_yield, # Fetches government-bond yield data.
     fetch_gold_market, # Fetches daily gold-market data.
+    fetch_commodity_market, # Fetches broad commodity-index data.
 )
 
 from models.market import (
@@ -430,5 +431,109 @@ def test_fetch_gold_market_rejects_invalid_data(
         ValueError
     ):
         fetch_gold_market(
+            api_key="test-key",
+        )
+
+# =========================
+# Commodity Market Fetcher
+# Broad commodity-index data should become a validated COMMODITIES MarketObservation.
+# =========================
+
+def test_fetch_commodity_market(
+    monkeypatch,
+): # Tests commodity parsing without making a real internet request.
+
+    class FakeResponse: # Simulates Alpha Vantage commodity JSON.
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "name": "Global Price Index of All Commodities",
+                "interval": "monthly",
+                "unit": "index_points",
+                "data": [
+                    {
+                        "date": "2026-07-01",
+                        "value": "193.20",
+                    },
+                    {
+                        "date": "2026-06-01",
+                        "value": "194.62",
+                    },
+                ],
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ): # Replaces requests.get during this test.
+
+        assert params["function"] == "ALL_COMMODITIES"
+        assert params["interval"] == "monthly"
+        assert params["apikey"] == "test-key"
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    observation = fetch_commodity_market(
+        api_key="test-key",
+    )
+
+    assert observation.asset_class == AssetClass.COMMODITIES
+    assert observation.measurement_type == MeasurementType.INDEX
+    assert observation.latest_value == Decimal("193.20")
+    assert observation.previous_value == Decimal("194.62")
+    assert observation.direction == MarketDirection.FALLING
+    assert observation.geography == "GLOBAL"
+
+
+# =========================
+# Invalid Commodity Data
+# Missing commodity observations should fail safely.
+# =========================
+
+def test_fetch_commodity_market_rejects_invalid_data(
+    monkeypatch,
+): # Tests safe failure when provider data is unusable.
+
+    class FakeResponse:
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "data": []
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+        fetch_commodity_market(
             api_key="test-key",
         )
