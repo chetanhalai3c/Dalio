@@ -1,12 +1,11 @@
 from typing import TypedDict, Annotated
 import operator
-
 from langchain_core.messages import AnyMessage
 
 from models.investor_profile import InvestorProfile
 from models.portfolio import Portfolio
 from models.macro import MacroSnapshot
-
+from models.market import MarketSnapshot # Validated cross-asset market data shared between LangGraph nodes.
 # =========================
 # Shared Investor State
 # =========================
@@ -28,6 +27,7 @@ class InvestorState(TypedDict, total=False):
     # Specialist analysis
     macro_snapshot: MacroSnapshot
     macro_results: str
+    market_snapshot: MarketSnapshot # Gives the Market Agent access to validated cross-asset facts.
     market_results: str
     portfolio_results: str
     risk_results: str
