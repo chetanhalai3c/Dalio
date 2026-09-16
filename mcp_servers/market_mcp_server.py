@@ -740,3 +740,31 @@ def build_market_snapshot(
         base_currency=base_currency,
         observations=observations,
     )
+
+# =========================
+# Market Snapshot MCP Tool
+# Exposes the combined cross-asset snapshot to MCP clients and agents.
+# =========================
+
+@mcp.tool() # Register this Python function as an MCP tool.
+def get_market_snapshot(
+    investor_country: str | None = None,
+    base_currency: str | None = None,
+) -> dict:
+    snapshot = build_market_snapshot(
+        investor_country=investor_country,
+        base_currency=base_currency,
+    ) # Build the validated cross-asset MarketSnapshot.
+
+    return snapshot.model_dump(
+        mode="json"
+    ) # Convert Pydantic MarketSnapshot into MCP-safe JSON data.
+
+
+# =========================
+# MCP Server Runner
+# Starts the Market MCP service when this file is run directly.
+# =========================
+
+if __name__ == "__main__":
+    mcp.run()

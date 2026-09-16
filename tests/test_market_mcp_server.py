@@ -1,7 +1,7 @@
 from decimal import Decimal # Precise numeric values for market tests.
 from datetime import date
 import pytest # Testing framework; also lets us assert that specific errors should happen.
-
+import asyncio
 from mcp_servers.market_mcp_server import (
     build_market_observation, # Converts provider-style values into our contract.
     calculate_market_direction, # Calculates rising/falling/stable/unknown.
@@ -12,6 +12,7 @@ from mcp_servers.market_mcp_server import (
     fetch_cash_market, # Fetches the short-term Treasury cash proxy.
     fetch_crypto_market, # Fetches Bitcoin/USD market data.
     build_market_snapshot,
+    mcp,
 )
 
 from models.market import (
@@ -948,3 +949,20 @@ def test_build_partial_market_snapshot(
     }
 
     assert AssetClass.GOLD not in asset_classes
+
+# =========================
+# Market Snapshot MCP Tool
+# Confirms the combined market snapshot is exposed through MCP.
+# =========================
+
+def test_market_snapshot_mcp_tool_registered():
+    tools = asyncio.run(
+        mcp.list_tools()
+    )
+
+    tool_names = [
+        tool.name
+        for tool in tools
+    ]
+
+    assert "get_market_snapshot" in tool_names
