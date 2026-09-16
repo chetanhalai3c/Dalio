@@ -9,6 +9,7 @@ from mcp_servers.market_mcp_server import (
     fetch_government_bond_yield, # Fetches government-bond yield data.
     fetch_gold_market, # Fetches daily gold-market data.
     fetch_commodity_market, # Fetches broad commodity-index data.
+    fetch_cash_market, # Fetches the short-term Treasury cash proxy.
 )
 
 from models.market import (
@@ -535,5 +536,110 @@ def test_fetch_commodity_market_rejects_invalid_data(
         ValueError
     ):
         fetch_commodity_market(
+            api_key="test-key",
+        )
+
+# =========================
+# Cash Market Fetcher
+# 3-month Treasury data should become a validated CASH MarketObservation.
+# =========================
+
+def test_fetch_cash_market(
+    monkeypatch,
+): # Tests cash-proxy parsing without making a real internet request.
+
+    class FakeResponse: # Simulates Alpha Vantage Treasury JSON.
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "name": "3-Month Treasury Rate",
+                "interval": "daily",
+                "unit": "percent",
+                "data": [
+                    {
+                        "date": "2026-09-14",
+                        "value": "4.11",
+                    },
+                    {
+                        "date": "2026-09-11",
+                        "value": "4.07",
+                    },
+                ],
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ): # Replaces requests.get during this test.
+
+        assert params["function"] == "TREASURY_YIELD"
+        assert params["interval"] == "daily"
+        assert params["maturity"] == "3month"
+        assert params["apikey"] == "test-key"
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    observation = fetch_cash_market(
+        api_key="test-key",
+    )
+
+    assert observation.asset_class == AssetClass.CASH
+    assert observation.measurement_type == MeasurementType.YIELD
+    assert observation.latest_value == Decimal("4.11")
+    assert observation.previous_value == Decimal("4.07")
+    assert observation.direction == MarketDirection.RISING
+    assert observation.unit == "percent"
+
+
+# =========================
+# Invalid Cash Data
+# Missing short-term Treasury observations should fail safely.
+# =========================
+
+def test_fetch_cash_market_rejects_invalid_data(
+    monkeypatch,
+): # Tests safe failure when provider data is unusable.
+
+    class FakeResponse:
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "data": []
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+        fetch_cash_market(
             api_key="test-key",
         )

@@ -483,3 +483,98 @@ def fetch_commodity_market(
         currency=None, # Broad commodity index is treated as an index observation.
         source_url="https://www.alphavantage.co/",
     )
+
+# =========================
+# Cash Market Fetcher
+# Uses the US 3-month Treasury yield as a cash-like market return proxy.
+# =========================
+
+def fetch_cash_market(
+    api_key: str | None = None,
+) -> MarketObservation: # Fetches one short-duration cash-like market observation.
+
+    resolved_api_key = (
+        api_key
+        or os.getenv("ALPHA_VANTAGE_API_KEY")
+    ) # Tests can inject a key; live code can use the .env value.
+
+    if not resolved_api_key: # Never call the provider without credentials.
+        raise ValueError(
+            "ALPHA_VANTAGE_API_KEY is required."
+        )
+
+    params = {
+        "function": "TREASURY_YIELD", # Treasury-yield endpoint.
+        "interval": "daily", # Recent daily observations.
+        "maturity": "3month", # Short-duration Treasury used as our cash proxy.
+        "apikey": resolved_api_key,
+    }
+
+    response = requests.get(
+        ALPHA_VANTAGE_URL,
+        params=params,
+        timeout=20,
+    ) # Fetch real short-term Treasury data.
+
+    response.raise_for_status() # Reject HTTP-level failures.
+
+    payload = response.json() # Convert provider JSON into Python data.
+
+    rows = payload.get(
+        "data",
+        []
+    ) # Extract Treasury observations.
+
+    valid_rows = [
+        row
+        for row in rows
+        if row.get("value") not in (
+            None,
+            "",
+            ".",
+        )
+    ] # Ignore missing Treasury observations.
+
+    if not valid_rows: # Bad provider data must not enter trusted Market state.
+        raise ValueError(
+            "No valid cash-proxy market data returned."
+        )
+
+    valid_rows.sort(
+        key=lambda row: row["date"],
+        reverse=True,
+    ) # Ensure newest observation appears first.
+
+    latest = valid_rows[0] # Most recent valid short-term Treasury yield.
+
+    previous = (
+        valid_rows[1]
+        if len(valid_rows) > 1
+        else None
+    ) # Previous valid yield may be unavailable.
+
+    return build_market_observation(
+        asset_name="US 3-Month Treasury Yield",
+        asset_class=AssetClass.CASH,
+        measurement_type=MeasurementType.YIELD,
+        latest_value=Decimal(
+            latest["value"]
+        ),
+        previous_value=(
+            Decimal(previous["value"])
+            if previous
+            else None
+        ),
+        unit="percent",
+        latest_period=latest["date"],
+        previous_period=(
+            previous["date"]
+            if previous
+            else None
+        ),
+        source="Alpha Vantage",
+        symbol="US3M",
+        geography="US",
+        currency=None, # Yield is expressed as a percentage rather than a price.
+        source_url="https://www.alphavantage.co/",
+    )
