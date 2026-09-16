@@ -10,6 +10,7 @@ from mcp_servers.market_mcp_server import (
     fetch_gold_market, # Fetches daily gold-market data.
     fetch_commodity_market, # Fetches broad commodity-index data.
     fetch_cash_market, # Fetches the short-term Treasury cash proxy.
+    fetch_crypto_market, # Fetches Bitcoin/USD market data.
 )
 
 from models.market import (
@@ -641,5 +642,118 @@ def test_fetch_cash_market_rejects_invalid_data(
         ValueError
     ):
         fetch_cash_market(
+            api_key="test-key",
+        )
+
+# =========================
+# Crypto Market Fetcher
+# Bitcoin/USD data should become a validated CRYPTO MarketObservation.
+# =========================
+
+def test_fetch_crypto_market(
+    monkeypatch,
+): # Tests Bitcoin parsing without making a real internet request.
+
+    class FakeResponse: # Simulates Alpha Vantage digital-currency JSON.
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "Meta Data": {
+                    "1. Information": "Daily Prices and Volumes for Digital Currency",
+                    "2. Digital Currency Code": "BTC",
+                },
+                "Time Series (Digital Currency Daily)": {
+                    "2026-09-16": {
+                        "1. open": "75584.17",
+                        "2. high": "75808.50",
+                        "3. low": "75523.35",
+                        "4. close": "75808.49",
+                        "5. volume": "85.07",
+                    },
+                    "2026-09-15": {
+                        "1. open": "78175.00",
+                        "2. high": "78242.76",
+                        "3. low": "74887.50",
+                        "4. close": "75584.17",
+                        "5. volume": "10155.20",
+                    },
+                },
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ): # Replaces requests.get during this test.
+
+        assert params["function"] == "DIGITAL_CURRENCY_DAILY"
+        assert params["symbol"] == "BTC"
+        assert params["market"] == "USD"
+        assert params["apikey"] == "test-key"
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    observation = fetch_crypto_market(
+        api_key="test-key",
+    )
+
+    assert observation.asset_class == AssetClass.CRYPTO
+    assert observation.measurement_type == MeasurementType.PRICE
+    assert observation.latest_value == Decimal("75808.49")
+    assert observation.previous_value == Decimal("75584.17")
+    assert observation.direction == MarketDirection.RISING
+    assert observation.symbol == "BTC"
+    assert observation.currency == "USD"
+
+
+# =========================
+# Invalid Crypto Data
+# Missing Bitcoin observations should fail safely.
+# =========================
+
+def test_fetch_crypto_market_rejects_invalid_data(
+    monkeypatch,
+): # Tests safe failure when provider data is unusable.
+
+    class FakeResponse:
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "Time Series (Digital Currency Daily)": {}
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+        fetch_crypto_market(
             api_key="test-key",
         )

@@ -578,3 +578,106 @@ def fetch_cash_market(
         currency=None, # Yield is expressed as a percentage rather than a price.
         source_url="https://www.alphavantage.co/",
     )
+
+# =========================
+# Crypto Market Fetcher
+# Uses Bitcoin/USD as the initial broad crypto-market proxy.
+# =========================
+
+def fetch_crypto_market(
+    api_key: str | None = None,
+) -> MarketObservation: # Fetches one Bitcoin market-price observation.
+
+    resolved_api_key = (
+        api_key
+        or os.getenv("ALPHA_VANTAGE_API_KEY")
+    ) # Tests can inject a key; live code can use the .env value.
+
+    if not resolved_api_key: # Never call the provider without credentials.
+        raise ValueError(
+            "ALPHA_VANTAGE_API_KEY is required."
+        )
+
+    params = {
+        "function": "DIGITAL_CURRENCY_DAILY", # Daily digital-currency endpoint.
+        "symbol": "BTC", # Bitcoin is our initial crypto-market proxy.
+        "market": "USD", # Price Bitcoin against US dollars.
+        "apikey": resolved_api_key,
+    }
+
+    response = requests.get(
+        ALPHA_VANTAGE_URL,
+        params=params,
+        timeout=20,
+    ) # Fetch live Bitcoin market data.
+
+    response.raise_for_status() # Reject HTTP-level failures.
+
+    payload = response.json() # Convert provider JSON into Python data.
+
+    time_series = payload.get(
+        "Time Series (Digital Currency Daily)",
+        {},
+    ) # Extract the date-indexed Bitcoin observations.
+
+    valid_rows = [
+        (date, values)
+        for date, values in time_series.items()
+        if values.get("4. close") not in (
+            None,
+            "",
+            ".",
+        )
+    ] # Keep only observations with a usable closing price.
+
+    if not valid_rows: # Bad provider data must not enter trusted Market state.
+        raise ValueError(
+            "No valid crypto market data returned."
+        )
+
+    valid_rows.sort(
+        key=lambda row: row[0],
+        reverse=True,
+    ) # ISO dates sort cleanly newest-first.
+
+    latest_date, latest_values = valid_rows[0] # Most recent valid Bitcoin close.
+
+    previous = (
+        valid_rows[1]
+        if len(valid_rows) > 1
+        else None
+    ) # Previous trading-day observation may be unavailable.
+
+    previous_date = (
+        previous[0]
+        if previous
+        else None
+    )
+
+    previous_values = (
+        previous[1]
+        if previous
+        else None
+    )
+
+    return build_market_observation(
+        asset_name="Bitcoin",
+        asset_class=AssetClass.CRYPTO,
+        measurement_type=MeasurementType.PRICE,
+        latest_value=Decimal(
+            latest_values["4. close"]
+        ),
+        previous_value=(
+            Decimal(previous_values["4. close"])
+            if previous_values
+            else None
+        ),
+        unit="price",
+        latest_period=latest_date,
+        previous_period=previous_date,
+        source="Alpha Vantage",
+        symbol="BTC",
+        geography="GLOBAL",
+        currency="USD",
+        source_url="https://www.alphavantage.co/",
+    )
