@@ -291,3 +291,98 @@ def fetch_government_bond_yield(
         currency=None, # A yield is a percentage, not a currency-denominated price.
         source_url="https://www.alphavantage.co/",
     )
+
+# =========================
+# Gold Market Fetcher
+# Fetches daily gold prices and converts them into our MarketObservation contract.
+# =========================
+
+def fetch_gold_market(
+    api_key: str | None = None,
+) -> MarketObservation: # Fetches one real gold-market observation.
+
+    resolved_api_key = (
+        api_key
+        or os.getenv("ALPHA_VANTAGE_API_KEY")
+    ) # Tests can inject a key; live code can use the .env value.
+
+    if not resolved_api_key: # Never call the provider without credentials.
+        raise ValueError(
+            "ALPHA_VANTAGE_API_KEY is required."
+        )
+
+    params = {
+        "function": "GOLD_SILVER_HISTORY", # Historical precious-metal prices.
+        "symbol": "GOLD", # Request gold rather than silver.
+        "interval": "daily", # Needed for latest vs previous daily comparison.
+        "apikey": resolved_api_key,
+    }
+
+    response = requests.get(
+        ALPHA_VANTAGE_URL,
+        params=params,
+        timeout=20,
+    ) # Fetch real gold-market data.
+
+    response.raise_for_status() # Reject HTTP-level failures.
+
+    payload = response.json() # Convert provider JSON into Python data.
+
+    rows = payload.get(
+        "data",
+        []
+    ) # Extract historical gold observations.
+
+    valid_rows = [
+        row
+        for row in rows
+        if row.get("price") not in (
+            None,
+            "",
+            ".",
+        )
+    ] # Remove missing or unusable observations.
+
+    if not valid_rows: # Bad provider data must not enter trusted Market state.
+        raise ValueError(
+            "No valid gold market data returned."
+        )
+
+    valid_rows.sort(
+        key=lambda row: row["date"],
+        reverse=True,
+    ) # Ensure newest gold observation appears first.
+
+    latest = valid_rows[0] # Most recent valid gold price.
+
+    previous = (
+        valid_rows[1]
+        if len(valid_rows) > 1
+        else None
+    ) # Previous price may be unavailable.
+
+    return build_market_observation(
+        asset_name="Gold",
+        asset_class=AssetClass.GOLD,
+        measurement_type=MeasurementType.PRICE,
+        latest_value=Decimal(
+            latest["price"]
+        ),
+        previous_value=(
+            Decimal(previous["price"])
+            if previous
+            else None
+        ),
+        unit="price",
+        latest_period=latest["date"],
+        previous_period=(
+            previous["date"]
+            if previous
+            else None
+        ),
+        source="Alpha Vantage",
+        symbol="GOLD",
+        geography="GLOBAL",
+        currency="USD",
+        source_url="https://www.alphavantage.co/",
+    )

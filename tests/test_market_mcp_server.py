@@ -7,6 +7,7 @@ from mcp_servers.market_mcp_server import (
     calculate_market_direction, # Calculates rising/falling/stable/unknown.
     fetch_equity_market, # Fetches real-provider-style equity data.
     fetch_government_bond_yield, # Fetches government-bond yield data.
+    fetch_gold_market, # Fetches daily gold-market data.
 )
 
 from models.market import (
@@ -324,5 +325,110 @@ def test_fetch_government_bond_yield_rejects_invalid_data(
         ValueError
     ):
         fetch_government_bond_yield(
+            api_key="test-key",
+        )
+
+# =========================
+# Gold Market Fetcher
+# Gold price data should become a validated GOLD MarketObservation.
+# =========================
+
+def test_fetch_gold_market(
+    monkeypatch,
+): # Tests gold parsing without making a real internet request.
+
+    class FakeResponse: # Simulates Alpha Vantage gold JSON.
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "name": "Gold Prices",
+                "interval": "daily",
+                "unit": "USD",
+                "data": [
+                    {
+                        "date": "2026-09-16",
+                        "price": "3700.00",
+                    },
+                    {
+                        "date": "2026-09-15",
+                        "price": "3680.00",
+                    },
+                ],
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ): # Replaces requests.get during this test.
+
+        assert params["function"] == "GOLD_SILVER_HISTORY"
+        assert params["symbol"] == "GOLD"
+        assert params["interval"] == "daily"
+        assert params["apikey"] == "test-key"
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    observation = fetch_gold_market(
+        api_key="test-key",
+    )
+
+    assert observation.asset_class == AssetClass.GOLD
+    assert observation.measurement_type == MeasurementType.PRICE
+    assert observation.latest_value == Decimal("3700.00")
+    assert observation.previous_value == Decimal("3680.00")
+    assert observation.direction == MarketDirection.RISING
+    assert observation.currency == "USD"
+
+
+# =========================
+# Invalid Gold Data
+# Missing gold observations should fail safely.
+# =========================
+
+def test_fetch_gold_market_rejects_invalid_data(
+    monkeypatch,
+): # Tests safe failure when provider data is unusable.
+
+    class FakeResponse:
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+        def json(
+            self,
+        ):
+            return {
+                "data": []
+            }
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+        fetch_gold_market(
             api_key="test-key",
         )
