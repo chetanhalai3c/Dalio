@@ -1,5 +1,9 @@
 from decimal import Decimal # Precise numeric values for market tests.
-
+from mcp_servers.market_mcp_server import (
+    build_market_observation,
+    calculate_market_direction,
+    fetch_equity_market, # Fetches real-provider-style equity data.
+)
 from models.market import (
     AssetClass, # Used to verify asset classification.
     MarketDirection, # Expected deterministic direction.
@@ -123,3 +127,98 @@ def test_build_observation_without_previous_value(): # Tests partial but valid m
 
     assert observation.previous_value is None
     assert observation.direction == MarketDirection.UNKNOWN
+
+# =========================
+# Equity Market Fetcher
+# Provider data should become a validated EQUITIES MarketObservation.
+# =========================
+
+def test_fetch_equity_market(
+    monkeypatch,
+): # Tests provider parsing without making a real internet request.
+
+    class FakeResponse: # Simulates the HTTP response from Alpha Vantage.
+        text = (
+            "timestamp,open,high,low,close,volume\n"
+            "2026-09-16,100,106,99,105,1000\n"
+            "2026-09-15,96,101,95,100,900\n"
+        )
+
+        def raise_for_status(
+            self,
+        ): # Simulated successful HTTP response.
+            return None
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ): # Replaces requests.get during this test.
+        assert params["function"] == "TIME_SERIES_DAILY"
+        assert params["symbol"] == "TEST"
+        assert params["apikey"] == "test-key"
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    observation = fetch_equity_market(
+        symbol="TEST",
+        asset_name="Example Equity Market",
+        geography="US",
+        currency="USD",
+        api_key="test-key",
+    )
+
+    assert observation.asset_class == AssetClass.EQUITIES
+    assert observation.measurement_type == MeasurementType.PRICE
+    assert observation.latest_value == Decimal("105")
+    assert observation.previous_value == Decimal("100")
+    assert observation.direction == MarketDirection.RISING
+    assert observation.latest_period == "2026-09-16"
+
+
+# =========================
+# Invalid Equity Provider Response
+# Bad provider data should not enter trusted Market state.
+# =========================
+
+def test_fetch_equity_market_rejects_invalid_data(
+    monkeypatch,
+): # Tests safe failure when provider data does not match expectations.
+
+    class FakeResponse:
+        text = '{"Information": "Provider error"}'
+
+        def raise_for_status(
+            self,
+        ):
+            return None
+
+    def fake_get(
+        url,
+        params,
+        timeout,
+    ):
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "mcp_servers.market_mcp_server.requests.get",
+        fake_get,
+    )
+
+    import pytest
+
+    with pytest.raises(
+        ValueError
+    ):
+        fetch_equity_market(
+            symbol="TEST",
+            asset_name="Example Equity Market",
+            geography="US",
+            currency="USD",
+            api_key="test-key",
+        )
