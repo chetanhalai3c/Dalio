@@ -7,6 +7,8 @@ from models.portfolio import Portfolio
 from models.macro import MacroSnapshot
 from models.market import MarketSnapshot # Validated cross-asset market data shared between LangGraph nodes.
 from models.portfolio_risk import PortfolioRiskSnapshot # Trusted deterministic portfolio-risk evidence shared between agents.
+from models.allocation import ProposedAllocation # Validated allocation proposal produced by the Allocation Agent.
+
 # =========================
 # Shared Investor State
 # =========================
@@ -36,7 +38,7 @@ class InvestorState(TypedDict, total=False):
     risk_results: str
 
     # Allocation proposal
-    proposed_allocation: str
+    proposed_allocation: ProposedAllocation # Structured allocation contract rather than free-form LLM text.
 
     # Allocation guardrail
     allocation_guardrail_allowed: bool
