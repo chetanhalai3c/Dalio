@@ -139,3 +139,69 @@ def fetch_historical_proxy_series(
         source="Alpha Vantage",
         observations=observations,
     )
+
+# =========================
+# Traditional Risk Proxies
+# Standardised USD-listed proxies for major economic exposures.
+# =========================
+
+TRADITIONAL_RISK_PROXIES = (
+    {
+        "symbol": "SPY",
+        "asset_class": AssetClass.EQUITIES,
+        "proxy_name": "SPDR S&P 500 ETF Trust",
+        "currency": "USD",
+    },
+    {
+        "symbol": "IEF",
+        "asset_class": AssetClass.GOVERNMENT_BONDS,
+        "proxy_name": "iShares 7-10 Year Treasury Bond ETF",
+        "currency": "USD",
+    },
+    {
+        "symbol": "GLD",
+        "asset_class": AssetClass.GOLD,
+        "proxy_name": "SPDR Gold Shares",
+        "currency": "USD",
+    },
+    {
+        "symbol": "DBC",
+        "asset_class": AssetClass.COMMODITIES,
+        "proxy_name": "Invesco DB Commodity Index Tracking Fund",
+        "currency": "USD",
+    },
+    {
+        "symbol": "BIL",
+        "asset_class": AssetClass.CASH,
+        "proxy_name": "SPDR Bloomberg 1-3 Month T-Bill ETF",
+        "currency": "USD",
+    },
+)
+
+
+# =========================
+# Traditional Risk Universe
+# Fetches comparable weekly histories for five economic exposures.
+# =========================
+
+def build_traditional_risk_proxy_universe(
+    api_key: str | None = None,
+) -> list[HistoricalAssetSeries]:
+
+    series_list = []
+
+    for proxy in TRADITIONAL_RISK_PROXIES:
+
+        series = fetch_historical_proxy_series(
+            symbol=proxy["symbol"],
+            asset_class=proxy["asset_class"],
+            proxy_name=proxy["proxy_name"],
+            currency=proxy["currency"],
+            api_key=api_key,
+        )
+
+        series_list.append(
+            series
+        )
+
+    return series_list

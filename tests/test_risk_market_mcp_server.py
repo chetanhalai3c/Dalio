@@ -5,9 +5,13 @@ import pytest
 
 from models.market import AssetClass
 from models.risk_market_data import (
+    HistoricalAssetSeries,
     HistoricalFrequency,
+    HistoricalPricePoint,
 )
+
 from mcp_servers.risk_market_mcp_server import (
+    build_traditional_risk_proxy_universe,
     fetch_historical_proxy_series,
 )
 
@@ -190,4 +194,163 @@ def test_historical_proxy_requires_api_key(
             asset_class=AssetClass.EQUITIES,
             proxy_name="Test Equity Proxy",
         )
-        
+# =========================
+# Traditional Risk Universe
+# All five traditional economic exposures should be fetched consistently.
+# =========================
+
+def test_build_traditional_risk_proxy_universe(
+    monkeypatch,
+):
+
+    captured = []
+
+    def fake_fetch_historical_proxy_series(
+        symbol,
+        asset_class,
+        proxy_name,
+        currency="USD",
+        api_key=None,
+    ):
+
+        captured.append(
+            {
+                "symbol": symbol,
+                "asset_class": asset_class,
+                "proxy_name": proxy_name,
+                "currency": currency,
+                "api_key": api_key,
+            }
+        )
+
+        return HistoricalAssetSeries(
+            asset_class=asset_class,
+            symbol=symbol,
+            proxy_name=proxy_name,
+            currency=currency,
+            frequency=HistoricalFrequency.WEEKLY,
+            source="Alpha Vantage",
+            observations=[
+                HistoricalPricePoint(
+                    observation_date=date(
+                        2026,
+                        1,
+                        2,
+                    ),
+                    price=Decimal("100"),
+                ),
+                HistoricalPricePoint(
+                    observation_date=date(
+                        2026,
+                        1,
+                        9,
+                    ),
+                    price=Decimal("101"),
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(
+        "mcp_servers.risk_market_mcp_server.fetch_historical_proxy_series",
+        fake_fetch_historical_proxy_series,
+    )
+
+    result = build_traditional_risk_proxy_universe(
+        api_key="test-key"
+    )
+
+    assert len(result) == 5
+
+    assert [
+        series.symbol
+        for series in result
+    ] == [
+        "SPY",
+        "IEF",
+        "GLD",
+        "DBC",
+        "BIL",
+    ]
+
+    assert {
+        series.asset_class
+        for series in result
+    } == {
+        AssetClass.EQUITIES,
+        AssetClass.GOVERNMENT_BONDS,
+        AssetClass.GOLD,
+        AssetClass.COMMODITIES,
+        AssetClass.CASH,
+    }
+
+    assert all(
+        series.currency == "USD"
+        for series in result
+    )
+
+    assert all(
+        call["api_key"] == "test-key"
+        for call in captured
+    )
+
+
+# =========================
+# Fail Closed
+# Incomplete proxy history must not silently become a complete risk universe.
+# =========================
+
+def test_traditional_risk_proxy_universe_propagates_failure(
+    monkeypatch,
+):
+
+    def fake_fetch_historical_proxy_series(
+        symbol,
+        asset_class,
+        proxy_name,
+        currency="USD",
+        api_key=None,
+    ):
+
+        if symbol == "DBC":
+            raise ValueError(
+                "Historical commodity data unavailable."
+            )
+
+        return HistoricalAssetSeries(
+            asset_class=asset_class,
+            symbol=symbol,
+            proxy_name=proxy_name,
+            currency=currency,
+            frequency=HistoricalFrequency.WEEKLY,
+            source="Alpha Vantage",
+            observations=[
+                HistoricalPricePoint(
+                    observation_date=date(
+                        2026,
+                        1,
+                        2,
+                    ),
+                    price=Decimal("100"),
+                ),
+                HistoricalPricePoint(
+                    observation_date=date(
+                        2026,
+                        1,
+                        9,
+                    ),
+                    price=Decimal("101"),
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(
+        "mcp_servers.risk_market_mcp_server.fetch_historical_proxy_series",
+        fake_fetch_historical_proxy_series,
+    )
+
+    with pytest.raises(
+        ValueError
+    ):
+        build_traditional_risk_proxy_universe(
+            api_key="test-key"
+        )
