@@ -41,6 +41,18 @@ def risk_agent(
     investor_profile = state.get(
         "investor_profile"
     )
+    portfolio_risk_snapshot = state.get(
+    "portfolio_risk_snapshot"
+    )    # Retrieve the trusted deterministic risk package from shared InvestorState.
+
+    portfolio_risk_data = (
+    portfolio_risk_snapshot.model_dump(
+        mode="json"
+    )
+
+    if portfolio_risk_snapshot is not None
+    else {}
+    ) # Convert the validated snapshot into prompt-ready data without recalculating anything.
 
     risk_metrics = (
         calculate_portfolio_structure_metrics(
@@ -99,30 +111,54 @@ Portfolio Agent Findings:
 Deterministic Risk Metrics:
 {risk_metrics}
 
+Deterministic Portfolio Risk Snapshot:
+{portfolio_risk_data}
+
 Relevant EducosysDalio Knowledge:
 {risk_knowledge}
 
 Return ONLY these four sections:
 
 1. CALCULATED RISK STRUCTURE
-- Explain the deterministic metrics supplied by
-  risk_tools.py.
+
+- Explain the deterministic portfolio-structure metrics
+  supplied by risk_tools.py.
 - Include holding weights, asset-class weights,
   largest-position weight and HHI where available.
+- When Deterministic Portfolio Risk Snapshot data is
+  available, also report:
+  - portfolio period volatility
+  - asset period volatility
+  - marginal risk contribution
+  - component risk contribution
+  - relative risk contribution
+  - calculated covariance
+  - calculated correlation
+- Clearly distinguish capital weight from risk contribution.
 
 2. RISK INTERPRETATION
-- Explain what the calculated numbers imply
-  structurally.
-- Use EducosysDalio principles to interpret
-  concentration and diversification.
-- Clearly separate calculation from interpretation.
+
+- Explain what the supplied deterministic calculations imply.
+- Use EducosysDalio principles to interpret portfolio
+  structure and measured risk.
+- When risk contribution has been calculated, explain
+  whether capital allocation and risk allocation differ.
+- When covariance or correlation has been calculated,
+  interpret only the relationships explicitly supplied.
+- Clearly separate deterministic calculation from
+  interpretation.
 
 3. RISK NOT YET CALCULATED
-- Identify quantitative risk metrics that cannot
-  yet be established.
-- Examples include volatility, correlation,
-  covariance, drawdown and risk contribution.
-- State that these require market-price/history data.
+
+- Identify only quantitative risk metrics that are genuinely
+  absent from both Deterministic Risk Metrics and the
+  Deterministic Portfolio Risk Snapshot.
+- Do NOT describe volatility, covariance, correlation or
+  risk contribution as unavailable when those values are
+  present in the Portfolio Risk Snapshot.
+- Examples of metrics that may remain unestablished include
+  historical drawdown, expected return and forward-looking
+  risk estimates unless explicitly supplied.
 
 4. INVESTOR CONTEXT LIMITS
 - Explain which missing InvestorProfile information
@@ -143,6 +179,7 @@ When stating portfolio value:
 
 Only interpret facts explicitly present in:
 - Deterministic Risk Metrics
+- Deterministic Portfolio Risk Snapshot
 - Investor Profile
 - Portfolio Agent Findings
 
@@ -157,7 +194,7 @@ Do NOT independently infer:
 - whether assets will move together
 - whether assets are highly or weakly correlated
 
-Do NOT claim, infer or estimate:
+Do NOT independently calculate, infer or estimate:
 - volatility
 - correlation
 - covariance
@@ -166,6 +203,14 @@ Do NOT claim, infer or estimate:
 - contribution to total risk
 - expected return
 - future market performance
+
+You MAY report and interpret volatility, correlation,
+covariance, marginal risk contribution, component risk
+contribution and relative risk contribution when those
+values are explicitly supplied in the Deterministic
+Portfolio Risk Snapshot.
+
+Never recalculate those values inside the LLM.
 
 If these relationships have not been calculated
 from market data, state only that they are
