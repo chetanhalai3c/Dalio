@@ -13,9 +13,15 @@ from langchain_groq import ChatGroq
 
 from backend.state import InvestorState
 from backend.guardrails.input_guardrail import evaluate_input_guardrail
+
 from agents.macro_agent import macro_agent
+from agents.market_agent import market_agent
+
 from mcp_servers.macro_mcp_server import (
     build_macro_snapshot_for_country,
+)
+from mcp_servers.market_mcp_server import (
+    build_market_snapshot,
 )
 
 # =========================
@@ -346,4 +352,83 @@ def run_macro_workflow(
     return {
         **macro_data,
         **macro_analysis,
+    }
+# =========================
+# Market Data Node
+# =========================
+
+def run_market_data(
+    state: InvestorState,
+) -> dict[str, Any]:
+    investor_profile = state.get(
+        "investor_profile"
+    )
+
+    investor_country = None
+    base_currency = None
+
+    if investor_profile is not None:
+        investor_country = (
+            investor_profile
+            .jurisdiction_currency
+            .country_of_residence
+        )
+
+        base_currency = (
+            investor_profile
+            .jurisdiction_currency
+            .spending_currency
+        )
+
+    snapshot = build_market_snapshot(
+        investor_country=investor_country,
+        base_currency=base_currency,
+    )
+
+    return {
+        "market_snapshot": snapshot
+    }
+
+
+# =========================
+# Market Specialist Node
+# =========================
+
+def run_market_specialist(
+    state: InvestorState,
+) -> dict[str, Any]:
+    if specialist_llm is None:
+        raise ValueError(
+            "GROQ_API_KEY is required for live specialist LLM calls."
+        )
+
+    return market_agent(
+        state,
+        specialist_llm,
+    )
+
+
+# =========================
+# Market Workflow
+# =========================
+
+def run_market_workflow(
+    state: InvestorState,
+) -> dict[str, Any]:
+    market_data = run_market_data(
+        state
+    )
+
+    enriched_state = {
+        **state,
+        **market_data,
+    }
+
+    market_analysis = run_market_specialist(
+        enriched_state
+    )
+
+    return {
+        **market_data,
+        **market_analysis,
     }
