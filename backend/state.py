@@ -6,6 +6,7 @@ from models.investor_profile import InvestorProfile
 from models.portfolio import Portfolio
 from models.macro import MacroSnapshot
 from models.market import MarketSnapshot # Validated cross-asset market data shared between LangGraph nodes.
+from models.portfolio_risk import PortfolioRiskSnapshot # Trusted deterministic portfolio-risk evidence shared between agents.
 # =========================
 # Shared Investor State
 # =========================
@@ -25,11 +26,13 @@ class InvestorState(TypedDict, total=False):
     supervisor_reasoning: str
 
     # Specialist analysis
+    # Specialist analysis
     macro_snapshot: MacroSnapshot
     macro_results: str
     market_snapshot: MarketSnapshot # Gives the Market Agent access to validated cross-asset facts.
     market_results: str
     portfolio_results: str
+    portfolio_risk_snapshot: PortfolioRiskSnapshot # Makes deterministic risk evidence available to Risk and Allocation Agents.
     risk_results: str
 
     # Allocation proposal
