@@ -14,16 +14,32 @@ from langchain_groq import ChatGroq
 from backend.state import InvestorState
 from backend.guardrails.input_guardrail import evaluate_input_guardrail
 
-from agents.macro_agent import macro_agent
-from agents.market_agent import market_agent
+from agents.macro_agent import macro_agent # Interprets validated macroeconomic evidence.
+from agents.market_agent import market_agent # Interprets validated cross-asset market evidence.
+from agents.portfolio_agent import portfolio_agent # Interprets the investor's current portfolio structure.
+from agents.risk_agent import risk_agent # Interprets structural and deterministic portfolio-risk evidence.
+from agents.allocation_agent import allocation_agent # Synthesises evidence into a structured ProposedAllocation.
 
+from backend.guardrails.allocation_guardrail import (
+    evaluate_allocation_guardrail, # Deterministically validates explicit allocation-policy rules.
+)
 from mcp_servers.macro_mcp_server import (
     build_macro_snapshot_for_country,
 )
 from mcp_servers.market_mcp_server import (
     build_market_snapshot,
 )
+from mcp_servers.risk_market_mcp_server import (
+    build_traditional_risk_proxy_universe, # Fetches historical analytical proxies for the supported broad asset classes.
+)
 
+from tools.portfolio_risk_adapter import (
+    build_risk_capital_weights, # Converts detailed portfolio holdings into broad risk-engine capital weights.
+)
+
+from tools.portfolio_risk_builder import (
+    build_portfolio_risk_snapshot, # Combines aligned historical data and deterministic maths into one trusted risk package.
+)
 # =========================
 # Environment
 # =========================
@@ -431,4 +447,144 @@ def run_market_workflow(
     return {
         **market_data,
         **market_analysis,
+    }
+
+# =========================
+# Portfolio Specialist Node
+# Runs portfolio analysis using the investor's existing holdings and profile.
+# =========================
+
+def run_portfolio_specialist(
+    state: InvestorState,
+) -> dict[str, Any]:
+
+    if specialist_llm is None:
+        raise ValueError(
+            "GROQ_API_KEY is required for live specialist LLM calls."
+        )
+
+    return portfolio_agent(
+        state,
+        specialist_llm,
+    )
+
+# =========================
+# Portfolio Risk Data Node
+# Builds the trusted deterministic PortfolioRiskSnapshot used by the Risk and Allocation Agents.
+# =========================
+
+def run_portfolio_risk_data(
+    state: InvestorState,
+) -> dict[str, Any]:
+
+    portfolio = state.get(
+        "portfolio"
+    ) # Retrieve the investor's validated portfolio from shared state.
+
+    if portfolio is None:
+        return {}
+        # No portfolio means there is no investor-specific portfolio risk snapshot to calculate.
+
+    capital_weights = build_risk_capital_weights(
+        portfolio
+    ) # Convert detailed holdings into broad economic asset-class weights.
+
+    historical_series = build_traditional_risk_proxy_universe()
+    # Fetch the supported historical proxy universe such as equities,
+    # government bonds, gold, commodities and cash.
+
+    relevant_series = [
+        series
+        for series in historical_series
+        if series.asset_class in capital_weights
+    ]
+    # Keep only historical proxies corresponding to asset classes
+    # actually present in this investor's portfolio.
+
+    snapshot = build_portfolio_risk_snapshot(
+        capital_weights=capital_weights,
+        series_list=relevant_series,
+    )
+    # Align historical observations and run the deterministic risk maths.
+
+    return {
+        "portfolio_risk_snapshot": snapshot
+    } # Place the trusted risk package into shared InvestorState.
+
+# =========================
+# Risk Specialist Node
+# Interprets structural portfolio risk and the deterministic PortfolioRiskSnapshot.
+# =========================
+
+def run_risk_specialist(
+    state: InvestorState,
+) -> dict[str, Any]:
+
+    if specialist_llm is None:
+        raise ValueError(
+            "GROQ_API_KEY is required for live specialist LLM calls."
+        )
+
+    return risk_agent(
+        state,
+        specialist_llm,
+    )
+
+# =========================
+# Allocation Specialist Node
+# Synthesises investor, portfolio, risk, macro and market evidence into ProposedAllocation.
+# =========================
+
+def run_allocation_specialist(
+    state: InvestorState,
+) -> dict[str, Any]:
+
+    if specialist_llm is None:
+        raise ValueError(
+            "GROQ_API_KEY is required for live specialist LLM calls."
+        )
+
+    return allocation_agent(
+        state,
+        specialist_llm,
+    )
+# =========================
+# Allocation Guardrail Node
+# Checks the proposed allocation against explicit deterministic product policy.
+# =========================
+
+def run_allocation_guardrail(
+    state: InvestorState,
+) -> dict[str, Any]:
+
+    proposal = state.get(
+        "proposed_allocation"
+    ) # Retrieve the validated proposal produced by the Allocation Agent.
+
+    if proposal is None:
+        return {
+            "allocation_guardrail_allowed": False,
+            "allocation_guardrail_reason": (
+                "No proposed allocation was available for validation."
+            ),
+        }
+        # Fail closed because there is nothing for the guardrail to approve.
+
+    guardrail_result = evaluate_allocation_guardrail(
+        proposal
+    )
+    # No numerical asset-class limits are supplied until
+    # explicit product policy has approved them.
+
+    reason = (
+        "; ".join(
+            guardrail_result.violations
+        )
+        if guardrail_result.violations
+        else ""
+    ) # Preserve deterministic violation explanations in the existing state field.
+
+    return {
+        "allocation_guardrail_allowed": guardrail_result.passed,
+        "allocation_guardrail_reason": reason,
     }
