@@ -172,3 +172,79 @@ def test_market_agent_without_snapshot(
     )
 
     assert result["llm_calls"] == 3
+
+# =========================
+# Unsupported Market Analysis
+# Unsafe LLM claims should be replaced by the deterministic market fallback.
+# =========================
+
+def test_market_agent_replaces_unsupported_analysis(
+    monkeypatch,
+):
+
+    monkeypatch.setattr(
+        "agents.market_agent.retrieve_knowledge",
+        lambda **kwargs: "Market knowledge",
+    )
+
+    snapshot = MarketSnapshot(
+        as_of_date=date(
+            2026,
+            9,
+            16,
+        ),
+        observations=[
+            MarketObservation(
+                asset_name="SPDR S&P 500 ETF Trust",
+                asset_class=AssetClass.EQUITIES,
+                symbol="SPY",
+                geography="US",
+                measurement_type=MeasurementType.PRICE,
+                latest_value=Decimal("754.13"),
+                previous_value=Decimal("755.00"),
+                unit="price",
+                currency="USD",
+                latest_period="2026-09-16",
+                previous_period="2026-09-15",
+                direction=MarketDirection.FALLING,
+                source="Alpha Vantage",
+            ),
+        ],
+    )
+
+    class UnsafeFakeLLM:
+        def invoke(
+            self,
+            messages,
+        ):
+            return FakeResponse(
+                "Markets are clearly moving into a risk-off environment."
+            )
+
+    result = market_agent(
+        {
+            "user_query": (
+                "What are markets doing?"
+            ),
+            "market_snapshot": snapshot,
+            "llm_calls": 0,
+        },
+        UnsafeFakeLLM(),
+    )
+
+    assert (
+        result["market_results"]
+        != "Markets are clearly moving into a risk-off environment."
+    )
+
+    assert (
+        "SPDR S&P 500 ETF Trust: 754.13 price"
+        in result["market_results"]
+    )
+
+    assert (
+        "not established"
+        in result["market_results"].lower()
+    )
+
+    assert result["llm_calls"] == 1

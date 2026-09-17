@@ -8,7 +8,10 @@ from langchain_core.messages import (
 
 from backend.knowledge import retrieve_knowledge # Retrieves relevant Dalio-style market knowledge.
 from backend.state import InvestorState # Shared LangGraph state containing market evidence and user context.
-
+from backend.guardrails.market_evidence_guardrail import (
+    build_safe_market_fallback, # Creates a deterministic response when the LLM overreaches.
+    market_analysis_is_grounded, # Checks whether the draft stays inside MarketSnapshot evidence.
+)
 
 # =========================
 # Market Knowledge
@@ -211,8 +214,16 @@ Use short, high-signal bullets.
         response.content
     ) # Capture the Market Agent's draft interpretation.
 
+    if not market_analysis_is_grounded(
+        analysis
+    ): # Reject unsupported market claims before they enter shared state.
+
+        analysis = build_safe_market_fallback(
+            snapshot_data
+        ) # Replace unsafe LLM interpretation with deterministic snapshot facts.
+
     return {
-        "market_results": analysis, # Write market interpretation back into shared state.
+        "market_results": analysis, # Only grounded market analysis enters shared state.
         "messages": [
             AIMessage(
                 content="Market analysis generated."
