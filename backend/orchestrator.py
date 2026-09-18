@@ -588,3 +588,192 @@ def run_allocation_guardrail(
         "allocation_guardrail_allowed": guardrail_result.passed,
         "allocation_guardrail_reason": reason,
     }
+
+# =========================
+# Workflow State Merge
+# Preserves accumulated messages while applying each node's state updates.
+# =========================
+
+def _merge_workflow_update(
+    state: InvestorState,
+    update: dict[str, Any],
+) -> InvestorState:
+
+    existing_messages = state.get(
+        "messages",
+        [],
+    )
+
+    new_messages = update.get(
+        "messages",
+        [],
+    )
+
+    merged_state = {
+        **state,
+        **update,
+    }
+
+    if existing_messages or new_messages:
+        merged_state["messages"] = [
+            *existing_messages,
+            *new_messages,
+        ]
+
+    return merged_state
+
+
+# =========================
+# CIO Workflow Executor
+# Executes the Supervisor's specialist plan in dependency-safe order.
+# =========================
+
+def run_cio_workflow(
+    state: InvestorState,
+) -> InvestorState:
+
+    # =========================
+    # CIO Supervisor
+    # Decide which specialist capabilities are required.
+    # =========================
+
+    supervisor_update = cio_supervisor(
+        state
+    )
+
+    working_state = _merge_workflow_update(
+        state,
+        supervisor_update,
+    )
+
+    if not working_state.get(
+        "guardrail_allowed",
+        True,
+    ):
+        return working_state
+        # Input guardrail blocked the request, so no specialists should run.
+
+    selected_agents = set(
+        working_state.get(
+            "selected_agents",
+            [],
+        )
+    )
+
+    # =========================
+    # Dependency Expansion
+    # Allocation requires portfolio and risk understanding first.
+    # =========================
+
+    if "allocation_agent" in selected_agents:
+        selected_agents.update(
+            {
+                "portfolio_agent",
+                "risk_agent",
+            }
+        )
+
+    if "risk_agent" in selected_agents:
+        selected_agents.add(
+            "portfolio_agent"
+        )
+
+    # =========================
+    # Macro
+    # Current economic evidence is gathered only when requested.
+    # =========================
+
+    if "macro_agent" in selected_agents:
+
+        macro_update = run_macro_workflow(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            macro_update,
+        )
+
+    # =========================
+    # Market
+    # Current cross-asset evidence is gathered only when requested.
+    # =========================
+
+    if "market_agent" in selected_agents:
+
+        market_update = run_market_workflow(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            market_update,
+        )
+
+    # =========================
+    # Portfolio
+    # Analyse the investor's actual holdings before portfolio risk.
+    # =========================
+
+    if "portfolio_agent" in selected_agents:
+
+        portfolio_update = run_portfolio_specialist(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            portfolio_update,
+        )
+
+    # =========================
+    # Portfolio Risk + Risk Specialist
+    # Python calculates first; the Risk Agent interprets second.
+    # =========================
+
+    if "risk_agent" in selected_agents:
+
+        portfolio_risk_update = run_portfolio_risk_data(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            portfolio_risk_update,
+        )
+
+        risk_update = run_risk_specialist(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            risk_update,
+        )
+
+    # =========================
+    # Allocation
+    # Synthesise accumulated evidence into ProposedAllocation.
+    # =========================
+
+    if "allocation_agent" in selected_agents:
+
+        allocation_update = run_allocation_specialist(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            allocation_update,
+        )
+
+        allocation_guardrail_update = run_allocation_guardrail(
+            working_state
+        )
+
+        working_state = _merge_workflow_update(
+            working_state,
+            allocation_guardrail_update,
+        )
+
+    return working_state

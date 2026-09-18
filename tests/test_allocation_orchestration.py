@@ -4,6 +4,7 @@ from types import SimpleNamespace # Lightweight fake historical-series objects.
 from backend.orchestrator import (
     run_allocation_guardrail,
     run_allocation_specialist,
+    run_cio_workflow, # Executes the CIO-selected workflow in dependency-safe order.
     run_portfolio_risk_data,
     run_portfolio_specialist,
     run_risk_specialist,
@@ -325,3 +326,246 @@ def test_run_allocation_guardrail_without_proposal():
     ] == (
         "No proposed allocation was available for validation."
     )
+
+# =========================
+# CIO Allocation Workflow
+# Proves allocation automatically expands its required portfolio and risk dependencies.
+# =========================
+
+def test_run_cio_workflow_expands_allocation_dependencies(
+    monkeypatch,
+):
+
+    calls = []
+
+    monkeypatch.setattr(
+        "backend.orchestrator.cio_supervisor",
+        lambda state: {
+            "guardrail_allowed": True,
+            "selected_agents": [
+                "allocation_agent"
+            ],
+            "messages": [],
+        },
+    )
+    # Simulate the CIO selecting only Allocation Agent.
+
+    def fake_portfolio_specialist(
+        state,
+    ):
+        calls.append(
+            "portfolio"
+        )
+
+        return {
+            "portfolio_results": "portfolio analysis"
+        }
+
+    def fake_portfolio_risk_data(
+        state,
+    ):
+        calls.append(
+            "portfolio_risk"
+        )
+
+        return {
+            "portfolio_risk_snapshot": "risk snapshot"
+        }
+
+    def fake_risk_specialist(
+        state,
+    ):
+        calls.append(
+            "risk"
+        )
+
+        assert (
+            state["portfolio_risk_snapshot"]
+            == "risk snapshot"
+        )
+
+        return {
+            "risk_results": "risk analysis"
+        }
+
+    def fake_allocation_specialist(
+        state,
+    ):
+        calls.append(
+            "allocation"
+        )
+
+        assert (
+            state["risk_results"]
+            == "risk analysis"
+        )
+
+        return {
+            "proposed_allocation": "proposal"
+        }
+
+    def fake_allocation_guardrail(
+        state,
+    ):
+        calls.append(
+            "allocation_guardrail"
+        )
+
+        assert (
+            state["proposed_allocation"]
+            == "proposal"
+        )
+
+        return {
+            "allocation_guardrail_allowed": True,
+            "allocation_guardrail_reason": "",
+        }
+
+    monkeypatch.setattr(
+        "backend.orchestrator.run_portfolio_specialist",
+        fake_portfolio_specialist,
+    )
+
+    monkeypatch.setattr(
+        "backend.orchestrator.run_portfolio_risk_data",
+        fake_portfolio_risk_data,
+    )
+
+    monkeypatch.setattr(
+        "backend.orchestrator.run_risk_specialist",
+        fake_risk_specialist,
+    )
+
+    monkeypatch.setattr(
+        "backend.orchestrator.run_allocation_specialist",
+        fake_allocation_specialist,
+    )
+
+    monkeypatch.setattr(
+        "backend.orchestrator.run_allocation_guardrail",
+        fake_allocation_guardrail,
+    )
+
+    result = run_cio_workflow(
+        {
+            "user_query": "How should I allocate my portfolio?"
+        }
+    )
+
+    assert calls == [
+        "portfolio",
+        "portfolio_risk",
+        "risk",
+        "allocation",
+        "allocation_guardrail",
+    ]
+    # Allocation cannot run before its portfolio and risk dependencies.
+
+    assert (
+        result["portfolio_results"]
+        == "portfolio analysis"
+    )
+
+    assert (
+        result["portfolio_risk_snapshot"]
+        == "risk snapshot"
+    )
+
+    assert (
+        result["risk_results"]
+        == "risk analysis"
+    )
+
+    assert (
+        result["proposed_allocation"]
+        == "proposal"
+    )
+
+    assert (
+        result["allocation_guardrail_allowed"]
+        is True
+    )
+
+
+# =========================
+# CIO Input Guardrail Stop
+# Proves blocked requests never reach specialist agents.
+# =========================
+
+def test_run_cio_workflow_stops_when_input_guardrail_blocks(
+    monkeypatch,
+):
+
+    monkeypatch.setattr(
+        "backend.orchestrator.cio_supervisor",
+        lambda state: {
+            "guardrail_allowed": False,
+            "guardrail_reason": "Request blocked.",
+            "selected_agents": [],
+            "final_response": "Request blocked.",
+            "messages": [],
+        },
+    )
+
+    def specialist_should_not_run(
+        state,
+    ):
+        raise AssertionError(
+            "Specialist should not run after input guardrail rejection."
+        )
+
+    monkeypatch.setattr(
+        "backend.orchestrator.run_portfolio_specialist",
+        specialist_should_not_run,
+    )
+
+    result = run_cio_workflow(
+        {
+            "user_query": "Blocked request"
+        }
+    )
+
+    assert result[
+        "guardrail_allowed"
+    ] is False
+
+    assert result[
+        "final_response"
+    ] == "Request blocked."
+
+
+# =========================
+# CIO Message Preservation
+# Proves node updates do not overwrite existing workflow history.
+# =========================
+
+def test_run_cio_workflow_preserves_messages(
+    monkeypatch,
+):
+
+    monkeypatch.setattr(
+        "backend.orchestrator.cio_supervisor",
+        lambda state: {
+            "guardrail_allowed": True,
+            "selected_agents": [],
+            "messages": [
+                "supervisor message"
+            ],
+        },
+    )
+
+    result = run_cio_workflow(
+        {
+            "user_query": "Explain my portfolio.",
+            "messages": [
+                "existing message"
+            ],
+        }
+    )
+
+    assert result[
+        "messages"
+    ] == [
+        "existing message",
+        "supervisor message",
+    ]
