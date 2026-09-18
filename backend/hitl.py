@@ -1,7 +1,7 @@
 from typing import Any # Supports workflow-compatible state update dictionaries.
 
 from langchain_core.messages import AIMessage # Records HITL status in workflow history.
-
+from langgraph.types import interrupt # Pauses LangGraph execution until the investor responds.
 from backend.state import InvestorState # Shared workflow state.
 from models.hitl import (
     HumanReview, # Validated human-review contract.
@@ -101,3 +101,70 @@ def apply_human_review(
             )
         ],
     }
+
+# =========================
+# Human Review Node
+# Pauses the LangGraph workflow until the investor approves, modifies or rejects.
+# =========================
+
+def human_review_node(
+    state: InvestorState,
+) -> dict[str, Any]:
+
+    proposal = state.get(
+        "proposed_allocation"
+    )
+
+    if proposal is None:
+        raise ValueError(
+            "Human review requires a proposed allocation."
+        )
+
+    if not state.get(
+        "allocation_guardrail_allowed",
+        False,
+    ):
+        raise ValueError(
+            "Human review cannot begin before the allocation guardrail passes."
+        )
+
+    review = interrupt(
+        {
+            "question": "What would you like to do with this proposed allocation?",
+            "approval_request": state.get(
+                "approval_request",
+                "",
+            ),
+            "proposed_allocation": proposal.model_dump(
+                mode="json"
+            ),
+            "expected_response": {
+                "decision": "approve | modify | reject",
+                "feedback": "Required when requesting modification.",
+            },
+        }
+    )
+    # Do not wrap interrupt() in try/except.
+    # LangGraph uses the interrupt internally to pause execution.
+
+    decision = ReviewDecision(
+        str(
+            review.get(
+                "decision",
+                "",
+            )
+        ).strip().lower()
+    )
+
+    feedback = str(
+        review.get(
+            "feedback",
+            "",
+        )
+    ).strip()
+
+    return apply_human_review(
+        state,
+        decision,
+        feedback,
+    )
