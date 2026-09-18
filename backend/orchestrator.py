@@ -13,7 +13,7 @@ from langchain_groq import ChatGroq
 
 from backend.state import InvestorState
 from backend.guardrails.input_guardrail import evaluate_input_guardrail
-
+from backend.hitl import prepare_allocation_review # Creates the human approval / modify / reject step after allocation safety passes.
 from agents.macro_agent import macro_agent # Interprets validated macroeconomic evidence.
 from agents.market_agent import market_agent # Interprets validated cross-asset market evidence.
 from agents.portfolio_agent import portfolio_agent # Interprets the investor's current portfolio structure.
@@ -775,5 +775,14 @@ def run_cio_workflow(
             working_state,
             allocation_guardrail_update,
         )
+        human_review_update = prepare_allocation_review(
+            working_state
+        )
+        # A proposal reaches the investor only after deterministic
+        # allocation-policy checks have passed.
 
+        working_state = _merge_workflow_update(
+            working_state,
+            human_review_update,
+        )
     return working_state

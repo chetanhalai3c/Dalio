@@ -19,7 +19,6 @@ from tools.portfolio_risk_adapter import (
     build_risk_capital_weights,
 )
 
-
 # =========================
 # Portfolio → Risk Adapter
 # Proves detailed portfolio classes collapse into broad risk-engine exposures.
@@ -329,7 +328,7 @@ def test_run_allocation_guardrail_without_proposal():
 
 # =========================
 # CIO Allocation Workflow
-# Proves allocation automatically expands its required portfolio and risk dependencies.
+# Proves allocation automatically expands its required portfolio, risk and HITL dependencies.
 # =========================
 
 def test_run_cio_workflow_expands_allocation_dependencies(
@@ -348,7 +347,7 @@ def test_run_cio_workflow_expands_allocation_dependencies(
             "messages": [],
         },
     )
-    # Simulate the CIO selecting only Allocation Agent.
+    # Simulate the CIO selecting only the Allocation Agent.
 
     def fake_portfolio_specialist(
         state,
@@ -421,6 +420,27 @@ def test_run_cio_workflow_expands_allocation_dependencies(
             "allocation_guardrail_reason": "",
         }
 
+    def fake_prepare_allocation_review(
+        state,
+    ):
+        calls.append(
+            "human_review"
+        )
+
+        assert (
+            state["allocation_guardrail_allowed"]
+            is True
+        )
+
+        assert (
+            state["proposed_allocation"]
+            == "proposal"
+        )
+
+        return {
+            "approval_request": "Review this allocation."
+        }
+
     monkeypatch.setattr(
         "backend.orchestrator.run_portfolio_specialist",
         fake_portfolio_specialist,
@@ -446,6 +466,11 @@ def test_run_cio_workflow_expands_allocation_dependencies(
         fake_allocation_guardrail,
     )
 
+    monkeypatch.setattr(
+        "backend.orchestrator.prepare_allocation_review",
+        fake_prepare_allocation_review,
+    )
+
     result = run_cio_workflow(
         {
             "user_query": "How should I allocate my portfolio?"
@@ -458,8 +483,10 @@ def test_run_cio_workflow_expands_allocation_dependencies(
         "risk",
         "allocation",
         "allocation_guardrail",
+        "human_review",
     ]
-    # Allocation cannot run before its portfolio and risk dependencies.
+    # Allocation must pass through portfolio, deterministic risk,
+    # Risk Agent, Allocation Agent, guardrail and then human review.
 
     assert (
         result["portfolio_results"]
@@ -484,6 +511,11 @@ def test_run_cio_workflow_expands_allocation_dependencies(
     assert (
         result["allocation_guardrail_allowed"]
         is True
+    )
+
+    assert (
+        result["approval_request"]
+        == "Review this allocation."
     )
 
 

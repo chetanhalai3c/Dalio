@@ -8,7 +8,7 @@ from models.macro import MacroSnapshot
 from models.market import MarketSnapshot # Validated cross-asset market data shared between LangGraph nodes.
 from models.portfolio_risk import PortfolioRiskSnapshot # Trusted deterministic portfolio-risk evidence shared between agents.
 from models.allocation import ProposedAllocation # Validated allocation proposal produced by the Allocation Agent.
-
+from models.hitl import HumanReview # Structured approve / modify / reject decision from the investor.
 # =========================
 # Shared Investor State
 # =========================
@@ -44,8 +44,9 @@ class InvestorState(TypedDict, total=False):
     allocation_guardrail_allowed: bool
     allocation_guardrail_reason: str
 
-    # Human-in-the-loop
+    # HITL approval
     approval_request: str
+    human_review: HumanReview # Canonical structured human decision on the proposed allocation.
     approved: bool
     human_feedback: str
 
